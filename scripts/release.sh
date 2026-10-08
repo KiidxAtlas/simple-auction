@@ -90,7 +90,6 @@ fi
 git tag -a "$TAG" -m "Release $TAG"
 git push origin "$TAG"
 
-echo "Pushed tag $TAG. GitHub Actions will build both:"
-echo "- Windows: dist/SimpleAuction-Setup-${TAG#v}.exe"
-echo "- macOS:   dist/SimpleAuction-macOS.dmg"
+echo "Pushed tag $TAG. GitHub Actions will build the Windows installer:"
+echo "- dist/SimpleAuction-Setup-${TAG#v}.exe"
 echo "Check Actions/Release page for artifacts."
