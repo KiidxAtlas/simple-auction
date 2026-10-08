@@ -1,0 +1,334 @@
+/* Values like $accent are filled in from theme.py. */
+
+QWidget {
+    color: $text;
+    font-size: 13px;
+}
+
+QMainWindow,
+QWidget#content,
+QSplitter#content,
+QWidget#scrollBody {
+    background: $bg;
+}
+
+QToolTip {
+    background: $surface;
+    color: $text;
+    border: 1px solid $border;
+    padding: 4px 6px;
+}
+
+QSplitter::handle {
+    background: $bg;
+}
+
+QSplitter::handle:hover {
+    background: $accent_soft;
+}
+
+/* ---- Sidebar ------------------------------------------------------- */
+
+QFrame#sidebar {
+    background: $sidebar;
+    border-right: 1px solid $border;
+}
+
+QLabel#appName {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+QLabel#sectionLabel {
+    color: $muted;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QTreeWidget#lotTree {
+    background: transparent;
+    border: none;
+    outline: 0;
+}
+
+/* ---- Buttons ------------------------------------------------------- */
+
+QPushButton {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: 6px;
+    padding: 7px 14px;
+}
+
+QPushButton:hover {
+    background: $hover;
+}
+
+QPushButton:pressed {
+    background: $border;
+}
+
+QPushButton#primary {
+    background: $accent;
+    color: $accent_text;
+    border: 1px solid $accent;
+    font-weight: 600;
+}
+
+QPushButton#primary:hover {
+    background: $accent_hover;
+    border-color: $accent_hover;
+}
+
+QPushButton#ghost {
+    background: transparent;
+    border: none;
+    color: $muted;
+    text-align: left;
+    padding: 8px 10px;
+}
+
+QPushButton#ghost:hover {
+    background: $hover;
+    color: $text;
+}
+
+QPushButton#link {
+    background: transparent;
+    border: none;
+    color: $accent;
+    padding: 2px 4px;
+}
+
+QPushButton#link:hover {
+    color: $accent_hover;
+    text-decoration: underline;
+}
+
+/* ---- Lot editor ---------------------------------------------------- */
+
+QLabel#lotTitle {
+    font-size: 26px;
+    font-weight: 700;
+}
+
+QLabel#saveState {
+    color: $muted;
+    font-size: 12px;
+}
+
+QLabel#saveState[state="error"] {
+    color: $danger;
+    font-weight: 600;
+}
+
+QLabel#subtitle,
+QLabel#hint {
+    color: $muted;
+}
+
+QLabel#emptyTitle {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+QFrame#card {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: ${radius}px;
+}
+
+QLabel#cardTitle {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel#fieldLabel {
+    color: $muted;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel#charCount {
+    color: $muted;
+    font-size: 11px;
+}
+
+QLabel#charCount[over="true"] {
+    color: $danger;
+    font-weight: 600;
+}
+
+QLineEdit,
+QPlainTextEdit,
+QComboBox {
+    background: $field;
+    border: 1px solid $border;
+    border-radius: 6px;
+    padding: 7px 9px;
+    selection-background-color: $accent;
+    selection-color: $accent_text;
+}
+
+QLineEdit:hover,
+QPlainTextEdit:hover,
+QComboBox:hover {
+    border-color: $muted;
+}
+
+QLineEdit:focus,
+QPlainTextEdit:focus,
+QComboBox:focus {
+    border: 1px solid $accent;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 28px;
+}
+
+QComboBox::down-arrow {
+    image: url($chevron);
+    width: 12px;
+    height: 12px;
+}
+
+QComboBox QAbstractItemView {
+    background: $surface;
+    border: 1px solid $border;
+    padding: 4px;
+    outline: 0;
+    selection-background-color: $accent_soft;
+    selection-color: $text;
+}
+
+QListWidget#photos {
+    background: $field;
+    border: 1px dashed $border;
+    border-radius: ${radius}px;
+    padding: 6px;
+    outline: 0;
+}
+
+QListWidget#photos::item {
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QListWidget#photos::item:selected {
+    background: $accent_soft;
+    color: $text;
+}
+
+QTableWidget#linksTable {
+    background: $field;
+    border: 1px solid $border;
+    border-radius: 6px;
+    gridline-color: $border;
+    selection-background-color: $accent_soft;
+    selection-color: $text;
+}
+
+QHeaderView::section {
+    background: $surface;
+    color: $muted;
+    border: none;
+    border-bottom: 1px solid $border;
+    padding: 4px 6px;
+    font-weight: 600;
+}
+
+/* ---- Research panel ------------------------------------------------ */
+
+QFrame#researchPanel {
+    background: $surface;
+    border-left: 1px solid $border;
+}
+
+QTextBrowser#transcript {
+    background: transparent;
+    border: none;
+    selection-background-color: $accent;
+    selection-color: $accent_text;
+}
+
+QPushButton:checked {
+    background: $accent_soft;
+    border-color: $accent;
+}
+
+QPushButton#ghostBordered {
+    background: transparent;
+    border: 1px solid $border;
+    border-radius: 6px;
+    padding: 7px 14px;
+}
+
+/* ---- Menus, scrollbars, status bar --------------------------------- */
+
+QMenu {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: ${radius}px;
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 6px 22px 6px 12px;
+    border-radius: 4px;
+}
+
+QMenu::item:selected {
+    background: $accent_soft;
+    color: $text;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: $border;
+    margin: 4px 6px;
+}
+
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical,
+QScrollBar::handle:horizontal {
+    background: $border;
+    border-radius: 3px;
+    min-height: 30px;
+    min-width: 30px;
+}
+
+QScrollBar::handle:hover {
+    background: $muted;
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line,
+QScrollBar::add-page,
+QScrollBar::sub-page {
+    width: 0;
+    height: 0;
+    background: none;
+}
+
+QStatusBar {
+    background: $bg;
+    color: $muted;
+    border-top: 1px solid $border;
+}
