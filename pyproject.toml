@@ -1,7 +1,7 @@
 [project]
 name = "simple-auction"
 version = "0.1.0"
-description = "Add your description here"
+description = "Desktop app for cataloguing auction lots into Excel, with photos, serial lookups and research."
 readme = "README.md"
 authors = [
     { name = "Atlas", email = "KiidxAtlas@users.noreply.github.com" }
@@ -16,8 +16,19 @@ dependencies = [
     "python-dotenv>=1.2.4",
 ]
 
+[project.urls]
+Homepage = "https://github.com/KiidxAtlas/simple-auction"
+Repository = "https://github.com/KiidxAtlas/simple-auction"
+Issues = "https://github.com/KiidxAtlas/simple-auction/issues"
+Releases = "https://github.com/KiidxAtlas/simple-auction/releases"
+
 [project.scripts]
 simple-auction = "simple_auction.__main__:main"
+
+[project.optional-dependencies]
+build = [
+    "pyinstaller>=6.22.3",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]

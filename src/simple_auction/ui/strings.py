@@ -150,3 +150,39 @@ AUCTION_FULL_TITLE = "Auction full"
 
 def count(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+# Updates
+MENU_HELP = "Help"
+MENU_CHECK_UPDATES = "Check for Updates…"
+UPDATES_TITLE = "Check for Updates"
+UPDATES_CURRENT = "You're running version {version}."
+UPDATES_CHECKING = "Checking for updates…"
+UPDATES_FAILED_TITLE = "Couldn't check for updates"
+UPDATES_FAILED = "Check your internet connection and try again."
+UPDATES_UP_TO_DATE = "✓ You're up to date"
+UPDATES_LATEST = "Version {version} is the latest available."
+UPDATES_AVAILABLE = "Update available: version {version}"
+UPDATES_AVAILABLE_BODY = "A new version is ready to download."
+UPDATES_RELEASE_PAGE = "Release page"
+UPDATES_INSTALL = "Download && Install"
+UPDATES_DOWNLOADING_BTN = "Downloading…"
+UPDATES_NO_CHECKSUM_TIP = (
+    "Automatic install is off because this release has no SHA-256 checksum."
+)
+UPDATES_NOT_VERIFIED_TITLE = "Update not verified"
+UPDATES_NOT_VERIFIED = (
+    "This release doesn't publish a SHA-256 checksum. Open the release page "
+    "and download it manually."
+)
+UPDATES_DOWNLOADING_TITLE = "Downloading Update"
+UPDATES_DOWNLOADING = "Downloading Simple Auction {version}…"
+UPDATES_PERCENT = "Downloading update… {percent}%"
+UPDATES_DOWNLOAD_FAILED_TITLE = "Download failed"
+UPDATES_DOWNLOAD_FAILED = (
+    "The update couldn't be downloaded. Try again later or use the release page."
+)
+UPDATES_READY_TITLE = "Update ready"
+UPDATES_READY = (
+    "The verified update was downloaded to:\n{path}\n\nOpen it to finish installing."
+)

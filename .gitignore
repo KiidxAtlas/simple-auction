@@ -11,3 +11,6 @@ wheels/
 
 # API keys
 .env
+
+# PyInstaller
+*.spec

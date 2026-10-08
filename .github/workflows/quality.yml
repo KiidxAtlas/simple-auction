@@ -1,0 +1,31 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync
+      - name: Install libegl1
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libegl1
+      - run: uvx ruff check .
+      - run: uv run ruff format --check src tests scripts
+      - run: uv run python -m compileall -q src tests
+      - run: uv run python -c "import simple_auction.ui.main_page"
+      - run: uv run pytest -q --tb=short

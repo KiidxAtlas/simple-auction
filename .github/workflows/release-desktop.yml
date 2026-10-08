@@ -1,0 +1,223 @@
+name: Build and publish desktop artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[build]
+
+      - name: Verify tag matches package metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: bash scripts/release.sh --check "${GITHUB_REF_NAME}"
+
+      - name: Build EXE
+        run: python scripts/build_standalone.py
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress --yes
+          $innoSetupPath = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6"
+          $isccPath = Join-Path $innoSetupPath "ISCC.exe"
+          if (-not (Test-Path $isccPath)) {
+            throw "Inno Setup compiler not found at $isccPath"
+          }
+          $innoSetupPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build Windows installer
+        run: python scripts/build_installer.py
+
+      - name: Generate installer SHA-256 checksum
+        shell: pwsh
+        run: |
+          $version = (python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])").Trim()
+          $installer = "dist/SimpleAuction-Setup-$version.exe"
+          if (-not (Test-Path $installer)) {
+            throw "Expected installer not found: $installer"
+          }
+          python scripts/build_standalone.py --checksum $installer
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleAuction-windows
+          if-no-files-found: error
+          path: |
+            dist/SimpleAuction-Setup-*.exe
+            dist/SimpleAuction-Setup-*.exe.sha256
+
+  build-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[build]
+
+      - name: Verify tag matches package metadata
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash scripts/release.sh --check "${GITHUB_REF_NAME}"
+
+      - name: Build macOS app bundle
+        run: python scripts/build_standalone.py
+
+      - name: Require macOS signing credentials
+        if: ${{ startsWith(github.ref, 'refs/tags/') && (env.MACOS_CERTIFICATE_BASE64 == '' || env.MACOS_CERTIFICATE_PASSWORD == '' || env.MACOS_SIGNING_IDENTITY == '') }}
+        run: |
+          echo "MACOS_CERTIFICATE_BASE64, MACOS_CERTIFICATE_PASSWORD, and MACOS_SIGNING_IDENTITY are required for a distributable release."
+          exit 1
+
+      - name: Import Developer ID certificate
+        if: ${{ env.MACOS_CERTIFICATE_BASE64 != '' }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          CERT_PATH="$RUNNER_TEMP/developer-id.p12"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          echo "MACOS_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Sign macOS app
+        if: ${{ env.MACOS_SIGNING_IDENTITY != '' }}
+        run: |
+          codesign --deep --force --options runtime --timestamp \
+            --sign "$MACOS_SIGNING_IDENTITY" dist/SimpleAuction.app
+          codesign --verify --deep --strict --verbose=2 dist/SimpleAuction.app
+
+      - name: Package DMG
+        run: |
+          hdiutil create -volname "SimpleAuction" \
+            -srcfolder "dist/SimpleAuction.app" \
+            -ov -format UDZO "dist/SimpleAuction-macOS.dmg"
+
+      - name: Require macOS notarization credentials
+        if: ${{ startsWith(github.ref, 'refs/tags/') && (env.APPLE_ID == '' || env.APPLE_APP_PASSWORD == '' || env.APPLE_TEAM_ID == '') }}
+        run: |
+          echo "APPLE_ID, APPLE_APP_PASSWORD, and APPLE_TEAM_ID are required for a distributable release."
+          exit 1
+
+      - name: Notarize and staple macOS DMG
+        if: ${{ env.MACOS_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
+        run: |
+          xcrun notarytool submit dist/SimpleAuction-macOS.dmg \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple dist/SimpleAuction-macOS.dmg
+          xcrun stapler validate dist/SimpleAuction-macOS.dmg
+
+      - name: Generate SHA-256 checksum
+        run: python scripts/build_standalone.py --checksum dist/SimpleAuction-macOS.dmg
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleAuction-macos
+          if-no-files-found: error
+          path: |
+            dist/SimpleAuction-macOS.dmg
+            dist/SimpleAuction-macOS.dmg.sha256
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Prepare release notes from changelog
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          version = tag.removeprefix("v")
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          heading = re.compile(
+              rf"^## {re.escape(version)} — \d{{4}}-\d{{2}}-\d{{2}}$",
+              re.MULTILINE,
+          )
+          match = heading.search(changelog)
+          if match is None:
+              raise SystemExit(f"Missing dated changelog heading for {version}.")
+          remainder = changelog[match.end():]
+          next_release = re.search(r"^## ", remainder, re.MULTILINE)
+          body = remainder[: next_release.start()] if next_release else remainder
+          Path("release-notes.md").write_text(body.strip() + "\n", encoding="utf-8")
+          PY
+
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: SimpleAuction-*
+          path: release
+          merge-multiple: true
+
+      - name: Verify release files
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          test -s "release/SimpleAuction-Setup-${version}.exe"
+          test -s "release/SimpleAuction-Setup-${version}.exe.sha256"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/SimpleAuction-Setup-*.exe
+            release/SimpleAuction-Setup-*.exe.sha256
+          fail_on_unmatched_files: true
+          body_path: release-notes.md
+          overwrite_files: true

@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from PySide6.QtCore import QFile, QSettings, Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -27,15 +27,22 @@ from simple_auction.services import (
 from simple_auction.services.config import Config
 from simple_auction.services.excel import ExcelLockedError
 from simple_auction.services.image import lot_photo_files, process_photos
+from simple_auction.services.updates import is_frozen
 from simple_auction.ui import strings, theme
 from simple_auction.ui.components.lot_form import LotForm
 from simple_auction.ui.components.lot_sidebar import LotSidebar, Selection
 from simple_auction.ui.components.research_panel import ResearchPanel
 from simple_auction.ui.settings import SettingsDialog
+from simple_auction.ui.update_dialog import (
+    UpdateCheckThread,
+    UpdateDialog,
+    keep_until_finished,
+)
 
 log = logging.getLogger(__name__)
 
 STATUS_MS = 4000
+STARTUP_UPDATE_DELAY_MS = 1500
 
 
 class MainPage(QMainWindow):
@@ -88,6 +95,15 @@ class MainPage(QMainWindow):
         self.form.serial_lookup_requested.connect(self.lookup_serial)
         self.form.research_toggled.connect(self.research.setVisible)
         self.research.closed.connect(self._close_research)
+
+        help_menu = self.menuBar().addMenu(strings.MENU_HELP)
+        check = help_menu.addAction(strings.MENU_CHECK_UPDATES, self.check_for_updates)
+        # On macOS this puts it in the app menu, next to About and Settings.
+        check.setMenuRole(QAction.MenuRole.ApplicationSpecificRole)
+
+        self._startup_update_thread: UpdateCheckThread | None = None
+        if is_frozen():  # built app only: running from source isn't "installed"
+            QTimer.singleShot(STARTUP_UPDATE_DELAY_MS, self._startup_update_check)
 
         self.refresh()
 
@@ -201,8 +217,30 @@ class MainPage(QMainWindow):
             self.sidebar.select(self.auction_no, self.lot_no)
         return False
 
+    # -- updates ------------------------------------------------------------
+
+    def check_for_updates(self) -> None:
+        UpdateDialog(self).exec()
+
+    def _startup_update_check(self) -> None:
+        """Check quietly; only speak up if a newer version exists."""
+        # Not parented to the window: deleting a running QThread is fatal.
+        thread = UpdateCheckThread()
+        thread.checkComplete.connect(self._on_startup_update_checked)
+        self._startup_update_thread = thread
+        thread.start()
+
+    def _on_startup_update_checked(self, info) -> None:
+        if info is not None and info.is_newer:
+            UpdateDialog(self, info).exec()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         self._ui_state.setValue("splitter", self.splitter.saveState())
+        thread = self._startup_update_thread
+        if thread is not None and thread.isRunning():
+            thread.checkComplete.disconnect()
+            keep_until_finished(thread)
+        self._startup_update_thread = None
         if self.flush():
             event.accept()
             return
