@@ -93,10 +93,6 @@ def _release_payload(digest: str, *, sidecar: bool = True) -> bytes:
         artifact["digest"] = digest
     assets = [
         artifact,
-        {
-            "name": "SimpleAuction-macOS.dmg",
-            "browser_download_url": "https://example.invalid/SimpleAuction-macOS.dmg",
-        },
     ]
     if sidecar:
         assets.append(
@@ -163,15 +159,11 @@ def test_update_check_rejects_malformed_api_digest_and_uses_sidecar(
     assert info.sha256 == expected
 
 
-def test_update_check_picks_the_dmg_on_macos(monkeypatch) -> None:
+def test_no_update_offered_off_windows(monkeypatch) -> None:
+    """Only Windows builds are released, so other platforms get nothing."""
     monkeypatch.setattr(updates.platform, "system", lambda: "Darwin")
     _serve(monkeypatch, _release_payload(""))
-
-    info = updates.check_for_updates()
-
-    assert info is not None
-    assert info.url.endswith("SimpleAuction-macOS.dmg")
-    assert info.sha256 is None  # no .dmg.sha256 published in this payload
+    assert updates.check_for_updates() is None
 
 
 def test_download_rejects_checksum_mismatch(tmp_path: Path, monkeypatch) -> None:

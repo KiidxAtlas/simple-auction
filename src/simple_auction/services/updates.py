@@ -72,15 +72,10 @@ def update_staging_path(version: str, system: str | None = None) -> Path:
     safe_version = re.sub(r"[^0-9A-Za-z._-]+", "-", version)
     safe_version = re.sub(r"\.{2,}", ".", safe_version).strip("-.") or "update"
     current_system = system or platform.system()
-    suffix = {
-        "Windows": ".exe",
-        "Darwin": ".dmg",
-        "Linux": ".tar.gz",
-    }.get(current_system, ".download")
     root = Path(tempfile.gettempdir()) / "simple-auction-updates"
     if current_system == "Windows":
-        return root / f"SimpleAuction-Setup-{safe_version}{suffix}"
-    return root / f"SimpleAuction-{safe_version}{suffix}"
+        return root / f"SimpleAuction-Setup-{safe_version}.exe"
+    return root / f"SimpleAuction-{safe_version}.download"
 
 
 def launch_windows_installer(installer_path: Path) -> bool:
@@ -265,25 +260,13 @@ def _compare_versions(v1: str, v2: str) -> int:
 
 
 def _get_download_url_for_platform(assets: list[dict]) -> str | None:
-    """Extract the appropriate download URL for the current platform."""
-    system = platform.system()
-
-    if system == "Darwin":
-        for asset in assets:
-            name = asset.get("name", "").lower()
-            if "macos" in name and name.endswith(".dmg"):
-                return asset.get("browser_download_url")
-    elif system == "Windows":
-        for asset in assets:
-            name = str(asset.get("name") or "").casefold()
-            if name.startswith("simpleauction-setup-") and name.endswith(".exe"):
-                return asset.get("browser_download_url")
-    elif system == "Linux":
-        for asset in assets:
-            name = asset.get("name", "").lower()
-            if "linux" in name or name.endswith(".tar.gz"):
-                return asset.get("browser_download_url")
-
+    """The Windows installer's download URL. Only Windows builds are released."""
+    if platform.system() != "Windows":
+        return None
+    for asset in assets:
+        name = str(asset.get("name") or "").casefold()
+        if name.startswith("simpleauction-setup-") and name.endswith(".exe"):
+            return asset.get("browser_download_url")
     return None
 
 

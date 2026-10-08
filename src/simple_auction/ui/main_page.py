@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from PySide6.QtCore import QFile, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -96,13 +96,12 @@ class MainPage(QMainWindow):
         self.form.research_toggled.connect(self.research.setVisible)
         self.research.closed.connect(self._close_research)
 
-        help_menu = self.menuBar().addMenu(strings.MENU_HELP)
-        check = help_menu.addAction(strings.MENU_CHECK_UPDATES, self.check_for_updates)
-        # On macOS this puts it in the app menu, next to About and Settings.
-        check.setMenuRole(QAction.MenuRole.ApplicationSpecificRole)
-
+        # Updates only apply to the installed (Windows) app; a copy running
+        # from source updates through git instead.
         self._startup_update_thread: UpdateCheckThread | None = None
-        if is_frozen():  # built app only: running from source isn't "installed"
+        if is_frozen():
+            help_menu = self.menuBar().addMenu(strings.MENU_HELP)
+            help_menu.addAction(strings.MENU_CHECK_UPDATES, self.check_for_updates)
             QTimer.singleShot(STARTUP_UPDATE_DELAY_MS, self._startup_update_check)
 
         self.refresh()

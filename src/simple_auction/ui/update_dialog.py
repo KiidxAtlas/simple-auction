@@ -283,9 +283,7 @@ class UpdateDialog(QDialog):
             strings.UPDATES_READY.format(path=download_path),
         )
         try:
-            if system == "Darwin":
-                subprocess.Popen(["open", str(download_path)])
-            elif system == "Windows":
+            if system == "Windows":
                 subprocess.Popen(["explorer", f"/select,{download_path}"])
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             _LOG.warning("Could not open the staged update: %s", exc)
