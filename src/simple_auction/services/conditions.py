@@ -103,11 +103,13 @@ def to_json(options: list[ConditionOption]) -> list[dict]:
 def from_json(data: object) -> list[ConditionOption]:
     if not isinstance(data, list):
         return list(DEFAULT_CONDITIONS)
-    return cleaned([
-        ConditionOption(str(d.get("name", "")), str(d.get("note", "")))
-        for d in data
-        if isinstance(d, dict)
-    ])
+    return cleaned(
+        [
+            ConditionOption(str(d.get("name", "")), str(d.get("note", "")))
+            for d in data
+            if isinstance(d, dict)
+        ]
+    )
 
 
 def load_file(path: Path) -> list[ConditionOption]:
@@ -139,12 +141,14 @@ def load_file(path: Path) -> list[ConditionOption]:
                 )
     else:
         raise ConditionsFileError(f"{path.name}: expected one 'Name: text' per line.")
-    return cleaned([
-        ConditionOption(
-            "" if name is None else str(name), "" if text is None else str(text)
-        )
-        for name, text in rows
-    ])
+    return cleaned(
+        [
+            ConditionOption(
+                "" if name is None else str(name), "" if text is None else str(text)
+            )
+            for name, text in rows
+        ]
+    )
 
 
 def _scalar(text: str) -> str:

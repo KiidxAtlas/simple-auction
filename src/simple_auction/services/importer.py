@@ -177,27 +177,39 @@ def guess_auction_number(
     return candidates[0] if candidates else None
 
 
-def _keyword_condition(text: str) -> str | None:
-    """Usual auction wording -> one of the default condition names."""
+# Usual auction wording -> condition names it could mean, best first. The
+# first of those that's in the configured list is used (see parse_condition).
+_WORDING: list[tuple[str, list[str]]] = [
+    (r"\blike new\b|\bas new\b|\b[la]nib\b|\bmint\b", ["Perfect", "Like New", "New"]),
+    (r"\bfactory new\b", ["Factory New", "New"]),
+    (r"\bnib\b|new in box|\bunfired\b|\bnew\b", ["New", "Factory New", "Like New"]),
+    (r"\bexcel", ["Excellent"]),
+    (r"\bvery good\b|\bvg\b", ["Very Good", "Excellent"]),
+    (r"\bfine\b", ["Fine"]),
+    (r"\bpoor\b|\bparts\b", ["Poor", "Fair"]),
+    (r"\bfair\b|\bworn\b", ["Fair"]),
+    (r"\bgood\b", ["Good"]),
+]
+
+
+def _wording_condition(text: str, by_lower: dict[str, str]) -> str | None:
     t = text.lower()
-    # NIB / LNIB / ANIB: (like / as) new in box.
-    if "new" in t or "mint" in t or "unfired" in t or re.search(r"\b[la]?nib\b", t):
-        return "Like New"
-    if "excel" in t or "very good" in t:
-        return "Excellent"
-    if "fair" in t or "poor" in t or "worn" in t:
-        return "Fair"
-    if "good" in t:
-        return "Good"
+    for pattern, candidates in _WORDING:
+        if re.search(pattern, t):
+            for name in candidates:
+                if name.lower() in by_lower:
+                    return by_lower[name.lower()]
+            return None
     return None
 
 
 def parse_condition(text: str, names: list[str]) -> str:
     """Match spreadsheet condition text to one of the configured `names`.
 
-    Blank stays blank. Exact name, then usual wording ("NIB" -> Like New) if that condition is
-    configured, then a configured name inside the text ("Good+"). Anything
-    else is kept as written, so no information is lost.
+    Blank stays blank. Then an exact name, then usual auction wording ("NIB"
+    -> New, "LNIB" -> Perfect) when that condition is configured, then a
+    configured name inside the text ("Good+"). Anything else is kept as
+    written, so no information is lost.
     """
     text = " ".join(text.split())
     by_lower = {n.lower(): n for n in names}
@@ -205,9 +217,8 @@ def parse_condition(text: str, names: list[str]) -> str:
         return ""  # left for someone to pick in the app
     if text.lower() in by_lower:
         return by_lower[text.lower()]
-    keyword = _keyword_condition(text)
-    if keyword and keyword.lower() in by_lower:
-        return by_lower[keyword.lower()]
+    if wording := _wording_condition(text, by_lower):
+        return wording
     for name in sorted(names, key=len, reverse=True):
         if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE):
             return name

@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+## 0.1.2 — 2026-10-09
+
 ### Changed
 
+- The default conditions are now a nine-step grading scale: Factory New,
+  New, Perfect, Excellent, Fine, Very Good, Good, Fair and Poor.
+- Importing a condition column understands usual auction wording for these
+  ("NIB" → New, "LNIB" → Perfect, "VG" → Very Good, "parts gun" → Poor).
 - Conditions now live in `data/conditions.yaml` in the main folder, one
   `Name: text` per line, so they're easy to edit in any text editor. Saved
   changes show up in the app right away; a mistake in the file is reported

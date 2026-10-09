@@ -43,7 +43,7 @@ def test_desc_keeps_user_text_after_condition_line():
     d = condition_desc("Line one.", "Good", NOTE["Good"], KNOWN) + "\n\nIncludes case."
     d = condition_desc(d, "Excellent", NOTE["Excellent"], KNOWN)
     assert "Includes case." in d and d.count("Condition:") == 1
-    assert d.endswith("Condition: Excellent. Light handling marks, bore bright.")
+    assert d.endswith(f"Condition: Excellent. {NOTE['Excellent']}")
 
 
 def test_condition_without_text_writes_just_the_name():

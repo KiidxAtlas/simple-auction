@@ -85,9 +85,9 @@ def test_build_lots_from_old_layout(tmp_path):
     first = lots[0]
     assert first.desc == "Winchester 94 30-30"
     assert first.serial == "1234567" and first.owner == "J. Miller"
-    assert first.condition == "Excellent" and first.year == 1965
+    assert first.condition == "Very Good" and first.year == 1965
     assert lots[1].condition == "Fair" and lots[1].year == 1918
-    assert lots[2].condition == "Like New" and lots[2].year is None
+    assert lots[2].condition == "New" and lots[2].year is None
 
 
 def test_renumber_when_lot_numbers_dont_fit_the_auction():
@@ -144,8 +144,20 @@ def test_parse_condition_matches_configured_names():
 
 def test_parse_condition_uses_wording_for_default_names():
     names = [o.name for o in DEFAULT_CONDITIONS]
-    assert parse_condition("NIB", names) == "Like New"
+    assert parse_condition("NIB", names) == "New"
+    assert parse_condition("LNIB", names) == "Perfect"
+    assert parse_condition("very good", names) == "Very Good"
+    assert parse_condition("VG, light holster wear", names) == "Very Good"
     assert parse_condition("worn bluing", names) == "Fair"
+    assert parse_condition("Poor, parts gun", names) == "Poor"
+
+
+def test_parse_condition_wording_falls_back_to_configured_names():
+    # With the old four-step list, the same wording still lands somewhere.
+    names = ["Like New", "Excellent", "Good", "Fair"]
+    assert parse_condition("NIB", names) == "Like New"
+    assert parse_condition("VG", names) == "Excellent"
+    assert parse_condition("poor", names) == "Fair"
 
 
 def test_add_lots_only_adds_missing(tmp_path):

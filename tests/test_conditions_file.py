@@ -47,7 +47,8 @@ def test_save_then_load_round_trip_with_awkward_names(tmp_path):
     save_file(path, options)
     text = path.read_text()
     assert text.startswith("# Lot conditions")
-    assert "Like New: Appears unfired or barely used, no notable wear.\n" in text
+    first = DEFAULT_CONDITIONS[0]
+    assert f"{first.name}: " in text.split("\n\n", 1)[1]  # one line per condition
     assert "As Is:\n" in text and "null" not in text
     assert load_file(path) == options
 
