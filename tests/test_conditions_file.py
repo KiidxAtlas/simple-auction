@@ -148,7 +148,10 @@ def test_existing_stock_yaml_is_upgraded_once(tmp_path):
     [
         [],
         [ConditionOption("Mint", "Never fired.")],
-        [ConditionOption("Like New", "My custom note."), *LEGACY_DEFAULT_CONDITIONS[1:]],
+        [
+            ConditionOption("Like New", "My custom note."),
+            *LEGACY_DEFAULT_CONDITIONS[1:],
+        ],
         list(reversed(LEGACY_DEFAULT_CONDITIONS)),
     ],
 )
@@ -167,6 +170,7 @@ def test_custom_conditions_are_not_replaced_by_defaults(tmp_path, source, option
     if original is not None:
         assert config.conditions_path.read_bytes() == original
 
+
 def test_broken_file_is_reported_and_never_overwritten(tmp_path):
     settings = tmp_path / "config.json"
     settings.write_text(json.dumps({"base_dir": str(tmp_path)}))
@@ -181,7 +185,8 @@ def test_broken_file_is_reported_and_never_overwritten(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "note", ["80% original finish", "80-90% finish", "% finish remaining", "% finish: unknown"]
+    "note",
+    ["80% original finish", "80-90% finish", "% finish remaining", "% finish: unknown"],
 )
 def test_percentage_notes_load_and_round_trip(tmp_path, note):
     path = tmp_path / "conditions.yaml"
@@ -203,5 +208,5 @@ def test_percent_notes_do_not_hide_other_yaml_errors(tmp_path):
 
 def test_yaml_list_accepts_percent_note(tmp_path):
     path = tmp_path / "conditions.yaml"
-    path.write_text('- name: Good\n  text: % original finish\n')
+    path.write_text("- name: Good\n  text: % original finish\n")
     assert load_file(path) == [ConditionOption("Good", "% original finish")]

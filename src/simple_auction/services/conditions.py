@@ -188,7 +188,9 @@ def _scalar(text: str, *, quote: bool = False) -> str:
 def save_file(path: Path, options: list[ConditionOption]) -> None:
     """Write conditions.yaml, one "Name: text" line each, under the header."""
     lines = [
-        f"{_scalar(o.name)}: {_scalar(o.note, quote=True)}" if o.note else f"{_scalar(o.name)}:"
+        f"{_scalar(o.name)}: {_scalar(o.note, quote=True)}"
+        if o.note
+        else f"{_scalar(o.name)}:"
         for o in options
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
