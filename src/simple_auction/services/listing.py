@@ -66,15 +66,22 @@ def find_option(options: list[ConditionOption], name: str) -> ConditionOption | 
 _MAKE_MODEL_LINE = re.compile(r"^(?:Make|Model):.*(?:\n|$)", re.MULTILINE)
 
 
-def make_model_prefix(make: str, model: str) -> str:
-    """ "Remington" + "870 Wingmaster" -> "Remington 870 Wingmaster"."""
-    return " ".join(part for part in (make.strip(), model.strip()) if part)
+def title_prefix(make: str, model: str, serial: str) -> str:
+    """The start of a title, in this order:
+    "Remington" "870 Wingmaster" "A123456M" -> "Remington 870 Wingmaster S/N: A123456M"."""
+    parts = [make.strip(), model.strip()]
+    if serial.strip():
+        parts.append(f"S/N: {serial.strip()}")
+    return " ".join(part for part in parts if part)
 
 
-def make_model_title(title: str, old_prefix: str, make: str, model: str) -> str:
-    """Start the title with make and model, replacing the previous make/model
-    start (old_prefix) so editing them later doesn't stack up."""
-    new = make_model_prefix(make, model)
+def prefixed_title(
+    title: str, old_prefix: str, make: str, model: str, serial: str
+) -> str:
+    """Start the title with make, model and serial, replacing the previous
+    start (old_prefix) so editing them later doesn't stack up. Words typed
+    after it, and the condition at the end, are kept."""
+    new = title_prefix(make, model, serial)
     rest = title.strip()
     for prefix in sorted({old_prefix, new}, key=len, reverse=True):
         if prefix and rest.lower().startswith(prefix.lower()):

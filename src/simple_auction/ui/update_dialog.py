@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from simple_auction.services.updates import (
+    UpdateCheckError,
     UpdateInfo,
     can_install_update_windows,
     check_for_updates,
@@ -50,14 +51,16 @@ def keep_until_finished(thread: QThread) -> None:
 class UpdateCheckThread(QThread):
     """Background thread for checking updates."""
 
-    checkComplete = Signal(object)  # UpdateInfo | None
+    checkComplete = Signal(object, str)  # UpdateInfo | None, why it failed
 
     def run(self) -> None:
         try:
-            self.checkComplete.emit(check_for_updates(timeout=10))
-        except (OSError, RuntimeError, ValueError) as exc:
-            _LOG.error("Update check thread error: %s", exc)
-            self.checkComplete.emit(None)
+            self.checkComplete.emit(check_for_updates(timeout=10), "")
+        except UpdateCheckError as exc:
+            self.checkComplete.emit(None, str(exc))
+        except Exception as exc:  # noqa: BLE001 - never leave it stuck on "Checking…"
+            _LOG.exception("Update check failed")
+            self.checkComplete.emit(None, f"{type(exc).__name__}: {exc}")
 
 
 class UpdateDownloadThread(QThread):
@@ -155,12 +158,12 @@ class UpdateDialog(QDialog):
         self._check_thread.checkComplete.connect(self._on_check_complete)
         self._check_thread.start()
 
-    def _on_check_complete(self, info: UpdateInfo | None) -> None:
+    def _on_check_complete(self, info: UpdateInfo | None, error: str = "") -> None:
         self._update_info = info
         self._clear_content()
-        self._show_result(info)
+        self._show_result(info, error)
 
-    def _show_result(self, info: UpdateInfo | None) -> None:
+    def _show_result(self, info: UpdateInfo | None, error: str = "") -> None:
         card = QFrame()
         card.setObjectName("card")
         card_layout = QVBoxLayout(card)
@@ -176,7 +179,7 @@ class UpdateDialog(QDialog):
 
         if info is None:
             heading.setText(strings.UPDATES_FAILED_TITLE)
-            message.setText(strings.UPDATES_FAILED)
+            message.setText(error or strings.UPDATES_FAILED)
         elif not info.is_newer:
             heading.setText(strings.UPDATES_UP_TO_DATE)
             message.setText(strings.UPDATES_LATEST.format(version=info.version))

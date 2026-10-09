@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import threading
 from collections.abc import Callable
@@ -67,17 +68,37 @@ class _Job(QObject):
         super().__init__()
         self._chat, self._question, self._lot = chat, question, lot
         self._stop = threading.Event()
+        self._state_lock = threading.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._task: asyncio.Task | None = None
 
     def start(self) -> None:
         threading.Thread(target=self._run, daemon=True).start()
 
     def stop(self) -> None:
-        self._stop.set()
+        with self._state_lock:
+            if self._stop.is_set():
+                return
+            self._stop.set()
+            if self._loop is not None and self._task is not None:
+                self._loop.call_soon_threadsafe(self._task.cancel)
 
     def _run(self) -> None:
-        events = self._chat.ask(self._question, self._lot)
         try:
-            for event in events:
+            asyncio.run(self._run_async())
+        finally:
+            self.finished.emit()
+
+    async def _run_async(self) -> None:
+        with self._state_lock:
+            self._loop = asyncio.get_running_loop()
+            self._task = asyncio.current_task()
+            if self._stop.is_set():
+                self._loop = self._task = None
+                return
+        events = self._chat.ask_async(self._question, self._lot)
+        try:
+            async for event in events:
                 if self._stop.is_set():
                     break
                 match event.kind:
@@ -93,6 +114,8 @@ class _Job(QObject):
                         self.refused.emit()
                     case "done":
                         self.done.emit(event.sources)
+        except asyncio.CancelledError:
+            pass  # a deliberate Stop, not an API failure
         except MissingApiKeyError:
             self.failed.emit(strings.RESEARCH_NO_KEY)
         except ce.AuthenticationError, ce.PermissionDeniedError:
@@ -127,8 +150,11 @@ class _Job(QObject):
             log.exception("Research failed")
             self.failed.emit(strings.RESEARCH_FAILED)
         finally:
-            events.close()  # closes the HTTP stream and rolls back if unfinished
-            self.finished.emit()
+            try:
+                await events.aclose()
+            finally:
+                with self._state_lock:
+                    self._loop = self._task = None
 
 
 class ResearchPanel(QFrame):
@@ -275,6 +301,7 @@ class ResearchPanel(QFrame):
         job.failed.connect(lambda msg: mine() and self._on_notice(turn, msg), queued)
         job.note.connect(lambda msg: mine() and setattr(turn, "note", msg), queued)
         job.finished.connect(lambda: mine() and self._on_finished(turn), queued)
+        job.finished.connect(job.deleteLater, queued)
         job.start()
 
     def _on_text(self, turn: _Turn, text: str) -> None:

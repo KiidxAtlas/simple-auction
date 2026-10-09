@@ -2,7 +2,8 @@ from simple_auction.models import Lot
 from simple_auction.services import lot_details
 from simple_auction.services.listing import (
     make_model_desc,
-    make_model_title,
+    prefixed_title,
+    title_prefix,
 )
 
 
@@ -29,20 +30,33 @@ def test_no_file_written_for_lots_without_details(tmp_path):
     assert not path.exists()
 
 
-def test_title_gets_make_model_and_stays_in_sync():
-    t = make_model_title("12ga Pump - Good", "", "Remington", "870")
+def test_title_starts_with_make_model_serial_and_stays_in_sync():
+    t = prefixed_title("12ga Pump - Good", "", "Remington", "870", "")
     assert t == "Remington 870 12ga Pump - Good"
+    # Serial added: goes after the model, typed words and condition kept.
+    old = title_prefix("Remington", "870", "")
+    t = prefixed_title(t, old, "Remington", "870", "A123456M")
+    assert t == "Remington 870 S/N: A123456M 12ga Pump - Good"
     # Model edited: the old start is replaced, not stacked.
-    t = make_model_title(t, "Remington 870", "Remington", "870 Wingmaster")
-    assert t == "Remington 870 Wingmaster 12ga Pump - Good"
-    # Model cleared.
-    assert make_model_title(t, "Remington 870 Wingmaster", "Remington", "") == (
-        "Remington 12ga Pump - Good"
+    old = title_prefix("Remington", "870", "A123456M")
+    t = prefixed_title(t, old, "Remington", "870 Wingmaster", "A123456M")
+    assert t == "Remington 870 Wingmaster S/N: A123456M 12ga Pump - Good"
+    # Serial cleared.
+    old = title_prefix("Remington", "870 Wingmaster", "A123456M")
+    assert prefixed_title(t, old, "Remington", "870 Wingmaster", "") == (
+        "Remington 870 Wingmaster 12ga Pump - Good"
     )
 
 
-def test_title_already_starting_with_make_model_is_not_doubled():
-    assert make_model_title("Colt 1911 Government", "", "Colt", "1911") == (
+def test_title_prefix_order_and_label():
+    assert title_prefix("Colt", "1911", "C123") == "Colt 1911 S/N: C123"
+    assert title_prefix("", "", "C123") == "S/N: C123"
+    assert title_prefix("Colt", "", "") == "Colt"
+    assert title_prefix("", "", "") == ""
+
+
+def test_title_already_starting_with_the_fields_is_not_doubled():
+    assert prefixed_title("Colt 1911 Government", "", "Colt", "1911", "") == (
         "Colt 1911 Government"
     )
 

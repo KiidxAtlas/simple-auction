@@ -22,12 +22,12 @@ EXPORT_TIP = "Save a copy of this auction's Excel file"
 SAVE = "Save"
 ALL_SAVED = "✓ All changes saved"
 SAVING = "Saving…"
-SAVE_LOCKED_INLINE = "Not saved: close {file} in Excel"
+SAVE_LOCKED_INLINE = "Not saved: can't write {file}"
 SAVE_FAILED_INLINE = "Not saved: see the log"
 UNSAVED_TITLE = "Unsaved changes"
 UNSAVED_BODY = (
-    "Lot {n} couldn't be saved. Close {file} in Excel and try again, "
-    "or quit and lose the changes."
+    "Lot {n} couldn't be saved to {file}:\n\n{error}\n\n"
+    "Fix the problem and try again, or quit and lose the unsaved edits."
 )
 QUIT_ANYWAY = "Quit without saving"
 
@@ -136,7 +136,7 @@ FORGET_KEY = "Remove key"
 CONDITIONS = "Conditions:"
 CONDITION_NAME = "Name"
 CONDITION_NOTE = "Text added to the description"
-CONDITIONS_HINT = "The first is the default for new lots."
+CONDITIONS_HINT = "Order here is the order in the dropdown."
 OPEN_CONDITIONS_FILE = "Open file…"
 OPEN_CONDITIONS_FILE_TIP = "Edit data/conditions.yaml in a text editor"
 CONDITIONS_RELOADED = "Conditions updated from conditions.yaml"
@@ -158,8 +158,8 @@ CONFIRM_DELETE = "Delete {what}?\n\nFiles will be moved to the Trash."
 EXPORT_FAILED = "Export failed, see the log."
 SAVE_FAILED = "Saving failed, see the log."
 TRASH_FAILED = "Couldn't move {name} to the Trash."
-EXCEL_LOCKED_TITLE = "File is open"
-EXCEL_LOCKED_BODY = "Close the Excel file and try again."
+EXCEL_LOCKED_TITLE = "Workbook can't be written"
+EXCEL_LOCKED_BODY = "The workbook couldn't be written. Close it in Excel if it's open, or check file and folder permissions, then try again."
 AUCTION_FULL_TITLE = "Auction full"
 
 
@@ -248,3 +248,27 @@ ERROR_BODY = (
     "That didn't work because of an unexpected error:\n\n{error}\n\n"
     "Details were saved to {log}"
 )
+
+# Storage and explicit settings recovery
+SAVE_FAILED_DETAIL = "Couldn't save lot {n}:\n\n{error}\n\nYour edits are still open. Fix the problem and try again."
+SAVE_ERROR_INLINE = "Couldn't save: {error}"
+IO_SAVING = "Saving lot…"
+IO_LOADING = "Loading catalogue…"
+IO_IMPORTING = "Importing lots…"
+IO_DELETING = "Deleting lots…"
+CATALOGUE_READ_FAILED = (
+    "Couldn't load auction {n}:\n\n{error}\n\nThe files were not overwritten."
+)
+CONFIG_RECOVERY_TITLE = "Settings need recovery"
+CONFIG_RECOVERY_BODY = (
+    "{error}\n\nYou can repair the file and retry, restore the last saved settings, "
+    "or choose your existing main and photos folders to create new settings. "
+    "Recovery preserves a copy of the damaged file. Auction files are not deleted."
+)
+CONFIG_RESTORE = "Restore backup"
+CONFIG_RESET = "Choose folders…"
+CONFIG_PICK_BASE = "Choose your existing main folder (containing auctions and data)"
+CONFIG_PICK_PHOTOS = "Choose your existing photos folder"
+ALREADY_RUNNING = "Another Simple Auction instance is running, or the settings folder cannot be locked. Close the other instance or check folder permissions before trying again."
+
+DARK_MODE = "Dark mode"

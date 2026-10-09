@@ -4,24 +4,28 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices, QIntValidator
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from simple_auction.services import api_key, lookup, numbering
 from simple_auction.services.conditions import ConditionOption, cleaned, save_file
 from simple_auction.services.config import Config
 from simple_auction.services.serial_links import SerialLink, is_valid
-from simple_auction.ui import strings
+from simple_auction.ui import strings, theme
 
 
 class SettingsDialog(QDialog):
@@ -33,6 +37,12 @@ class SettingsDialog(QDialog):
         self.folder = QLineEdit(str(config.base_dir))
         self.photos = QLineEdit(str(config.photos_dir))
 
+        self.dark_mode_toggle = QCheckBox(strings.DARK_MODE)
+        self.dark_mode_toggle.setChecked(
+            theme.colors() == theme.DARK
+            if config.dark_mode is None
+            else config.dark_mode
+        )
         self._suggested = numbering.next_auction(existing, config.step, config.start_at)
         self.next_number = QLineEdit(str(self._suggested))
         self.next_number.setValidator(QIntValidator(1, 99_999_000, self.next_number))
@@ -72,7 +82,7 @@ class SettingsDialog(QDialog):
         links_row.addWidget(remove_link)
 
         # Conditions: name + the sentence added to the description. Row order
-        # is the dropdown order; the first is the default for new lots.
+        # is the dropdown order.
         self.conditions_table = QTableWidget(0, 2)
         self.conditions_table.setObjectName("linksTable")
         self.conditions_table.setHorizontalHeaderLabels(
@@ -127,8 +137,11 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
-        layout = QVBoxLayout(self)
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(6)
+        layout.addWidget(self.dark_mode_toggle)
+        layout.addSpacing(10)
         layout.addWidget(QLabel(strings.AUCTIONS_FOLDER))
         layout.addLayout(self._folder_row(self.folder, strings.PICK_FOLDER))
         layout.addSpacing(10)
@@ -152,7 +165,17 @@ class SettingsDialog(QDialog):
         layout.addWidget(QLabel(strings.API_KEY))
         layout.addLayout(key_row)
         layout.addSpacing(14)
-        layout.addWidget(buttons)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.addWidget(scroll)
+        outer.addWidget(buttons)
+        self.resize(680, min(860, self.screen().availableGeometry().height() - 80))
+
+    def dark_mode(self) -> bool:
+        return self.dark_mode_toggle.isChecked()
 
     def base_dir(self) -> Path:
         return Path(self.folder.text()).expanduser()

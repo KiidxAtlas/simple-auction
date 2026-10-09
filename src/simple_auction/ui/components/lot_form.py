@@ -35,8 +35,8 @@ from simple_auction.services.listing import (
     condition_title,
     find_option,
     make_model_desc,
-    make_model_prefix,
-    make_model_title,
+    prefixed_title,
+    title_prefix,
     untrimmed_title_length,
 )
 from simple_auction.services.lookup import LookupResult
@@ -93,7 +93,7 @@ class LotForm(QWidget):
         self._has_links = False
         # The make/model last written into the title and description, so a
         # later edit replaces it instead of adding another copy.
-        self._applied_make_model = ("", "")
+        self._applied_title_fields = ("", "", "")  # make, model, serial
         # Condition choices from Settings, and the condition whose text is
         # currently in the title/description (so changing it replaces that).
         self._conditions: list[ConditionOption] = list(DEFAULT_CONDITIONS)
@@ -186,10 +186,10 @@ class LotForm(QWidget):
         self.condition.activated.connect(self._apply_condition)
         self.make = QLineEdit()
         self.make.setPlaceholderText(strings.MAKE_PLACEHOLDER)
-        self.make.editingFinished.connect(self._apply_make_model)
+        self.make.editingFinished.connect(self._apply_title_fields)
         self.model = QLineEdit()
         self.model.setPlaceholderText(strings.MODEL_PLACEHOLDER)
-        self.model.editingFinished.connect(self._apply_make_model)
+        self.model.editingFinished.connect(self._apply_title_fields)
         self.lookup_hint = QLabel()
         self.lookup_hint.setObjectName("hint")
         self.lookup_hint.setWordWrap(True)
@@ -328,7 +328,7 @@ class LotForm(QWidget):
         self.year.setText("" if lot.year is None else str(lot.year))
         self.make.setText(lot.make)
         self.model.setText(lot.model)
-        self._applied_make_model = (lot.make, lot.model)
+        self._applied_title_fields = (lot.make, lot.model, lot.serial)
         self._looked_up = lot.serial
         self.lookup_hint.clear()
         self._update_lookup_row()
@@ -383,7 +383,7 @@ class LotForm(QWidget):
                 self.make.setText(hit.maker)
             if not self.model.text().strip() and hit.model:
                 self.model.setText(hit.model)
-            self._apply_make_model()
+            self._apply_title_fields()
             text = strings.LOOKUP_FOUND.format(title=hit.title, year=hit.year)
         elif results:
             matches = ", ".join(f"{r.title} ({r.year})" for r in results)
@@ -502,23 +502,31 @@ class LotForm(QWidget):
                 self.desc.setPlainText(desc)
         self._applied_condition = condition
 
-    def _apply_make_model(self) -> None:
-        """Put make and model at the start of the title and the top of the
-        description, replacing what was put there before."""
-        make, model = self.make.text().strip(), self.model.text().strip()
-        if (make, model) == self._applied_make_model:
+    def _apply_title_fields(self) -> None:
+        """Start the title with make, model and serial (the condition ends
+        it), and put make and model at the top of the description, replacing
+        what was put there before. Runs when one of those fields is edited."""
+        fields = (
+            self.make.text().strip(),
+            self.model.text().strip(),
+            self.serial.text().strip(),
+        )
+        if fields == self._applied_title_fields:
             return
-        old_prefix = make_model_prefix(*self._applied_make_model)
-        self._applied_make_model = (make, model)
-        title = make_model_title(self.title.text(), old_prefix, make, model)
+        old = self._applied_title_fields
+        self._applied_title_fields = fields
+        make, model, _serial = fields
+        title = prefixed_title(self.title.text(), title_prefix(*old), *fields)
         if title != self.title.text():
             self.title.setText(title)
-        desc = make_model_desc(self.desc.toPlainText(), make, model)
-        if desc != self.desc.toPlainText():
-            self.desc.setPlainText(desc)
+        if (make, model) != old[:2]:
+            desc = make_model_desc(self.desc.toPlainText(), make, model)
+            if desc != self.desc.toPlainText():
+                self.desc.setPlainText(desc)
         self._apply_condition()  # re-check the title length with its suffix
 
     def _on_serial_done(self) -> None:
+        self._apply_title_fields()
         serial = self.serial.text().strip()
         if serial == self._looked_up:
             return

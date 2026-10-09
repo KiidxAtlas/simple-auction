@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Changed
+
+- Titles are built in this order: make, model, serial number (as
+  `S/N: A123456M`), then anything typed, then the condition — e.g.
+  "Remington 870 Wingmaster S/N: A123456M 12ga Pump - Excellent". Editing
+  make, model or serial updates the start of the title in place.
+- New lots start with no condition ("Pick a condition"), like imported lots:
+  nothing is added to the title or description, even when saving, until
+  someone picks one.
+- Settings now has a **Dark mode** toggle. Saving applies the choice immediately
+  and remembers it across restarts, independently of the system appearance.
+
+### Fixed
+
+- Failed photo replacements and workbook/details writes preserve the previous
+  lot state. Saves use atomic file replacement and a recovery journal; startup
+  rolls back interrupted saves. Imports and lot deletions also coordinate their
+  workbook and details updates.
+- Damaged lot-details files are reported instead of silently overwritten.
+- Damaged settings have explicit startup recovery, preserving the original
+  file and offering backup restore or selection of existing data folders.
+- Photo processing, saving and catalogue reads no longer run on the GUI thread.
+  Longer operations show progress, and unchanged auctions are cached.
+- Save errors report the actual problem rather than always blaming Excel.
+- Stopping research interrupts pending HTTP requests and closes their resources,
+  without advancing unfinished conversation history.
+
+- Check for Updates said "check your internet connection" on some Windows
+  PCs that were online. The app now checks secure connections the same way
+  Windows and browsers do (Python's stricter checks rejected certificates
+  added by antivirus web protection), and if a check does fail, the window
+  says why.
+
 ## 0.1.2 — 2026-10-09
 
 ### Changed

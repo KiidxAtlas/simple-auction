@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import ssl
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 from simple_auction.services import updates
 
@@ -160,10 +163,51 @@ def test_update_check_rejects_malformed_api_digest_and_uses_sidecar(
 
 
 def test_no_update_offered_off_windows(monkeypatch) -> None:
-    """Only Windows builds are released, so other platforms get nothing."""
+    """Only Windows builds are released, so other platforms get a reason."""
     monkeypatch.setattr(updates.platform, "system", lambda: "Darwin")
     _serve(monkeypatch, _release_payload(""))
-    assert updates.check_for_updates() is None
+    with pytest.raises(updates.UpdateCheckError, match="no installer"):
+        updates.check_for_updates()
+
+
+def _fail_with(monkeypatch, exc: BaseException) -> None:
+    def urlopen(*_args, **_kwargs):
+        raise exc
+
+    monkeypatch.setattr(updates.urllib.request, "urlopen", urlopen)
+
+
+def test_certificate_failure_is_explained_not_blamed_on_internet(monkeypatch) -> None:
+    """What Python 3.13+ reports on PCs whose antivirus inspects HTTPS."""
+    cert_error = ssl.SSLCertVerificationError(1, "certificate verify failed")
+    cert_error.verify_message = "Basic Constraints of CA cert not marked critical"
+    _fail_with(monkeypatch, updates.urllib.error.URLError(cert_error))
+    with pytest.raises(updates.UpdateCheckError) as caught:
+        updates.check_for_updates()
+    assert "secure connection" in str(caught.value)
+    assert "Basic Constraints" in str(caught.value)
+
+
+def test_rate_limit_and_timeout_messages(monkeypatch) -> None:
+    limited = updates.urllib.error.HTTPError(
+        "https://api.github.com", 403, "rate limit exceeded", {}, None
+    )
+    assert "limiting requests" in updates.describe_network_error(limited)
+    timed_out = updates.urllib.error.URLError(TimeoutError("timed out"))
+    assert "in time" in updates.describe_network_error(timed_out)
+    offline = updates.urllib.error.URLError(OSError("nodename nor servname"))
+    _fail_with(monkeypatch, offline)
+    with pytest.raises(updates.UpdateCheckError, match="Couldn't reach GitHub"):
+        updates.check_for_updates()
+
+
+def test_app_uses_system_certificate_checking() -> None:
+    """The fix itself: truststore is installed and the startup hook uses it."""
+    import truststore  # noqa: F401  (must be importable in every build)
+
+    from simple_auction import __main__ as app_main
+
+    assert "inject_into_ssl" in Path(app_main.__file__).read_text()
 
 
 def test_download_rejects_checksum_mismatch(tmp_path: Path, monkeypatch) -> None:

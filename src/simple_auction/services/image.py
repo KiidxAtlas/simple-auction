@@ -1,5 +1,5 @@
 import io
-import uuid
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -10,6 +10,7 @@ from simple_auction.constants import (
     IMAGE_MIN_QUALITY,
     IMAGE_SIZE_RATIO,
 )
+from simple_auction.services import storage
 
 
 def image_name(lot_number: int, index: int) -> str:
@@ -38,38 +39,57 @@ def process_photos(
     dest: Path,
     discard: Callable[[Path], object] = Path.unlink,
 ) -> list[Path]:
-    """Make dest hold exactly `photos` for this lot, named 41001, 41001-1, ...
+    """Validate all photos before changing disk; restore originals on failure."""
+    journal = dest / f".{lot_number}.transaction"
+    with storage.lock:
+        storage.recover(journal)
+        changes, out = prepare_photos(lot_number, photos, dest)
+        removed = {p: p.read_bytes() for p, data in changes.items() if data is None}
+        storage.commit(changes, journal)
+        if discard is not Path.unlink and removed:
+            archive = archive_removed(removed, dest)
+            for copy in archive.iterdir():
+                discard(copy)
+            if not any(archive.iterdir()):
+                archive.rmdir()
+    return out
 
-    New photos are compressed. Photos already in dest were compressed when
-    first added, so they are only renamed. Old files no longer in the list
-    are passed to `discard`.
-    """
-    dest.mkdir(parents=True, exist_ok=True)
-    resolved = {p.resolve() for p in photos}
-    for old in lot_photo_files(lot_number, dest):
-        if old.resolve() not in resolved:
-            discard(old)
 
-    # Move processed photos out of the way so renames can't collide.
-    staged: dict[Path, Path] = {}
-    for src in photos:
-        if src.parent.resolve() == dest.resolve() and src.exists():
-            tmp = dest / f".staging-{uuid.uuid4().hex}.jpg"
-            src.rename(tmp)
-            staged[src] = tmp
+def archive_removed(removed: dict[Path, bytes], folder: Path) -> Path:
+    """Preserve removed photos for recycling; failures leave the archive intact."""
+    folder.mkdir(parents=True, exist_ok=True)
+    archive = Path(tempfile.mkdtemp(prefix=".removed-", dir=folder))
+    for path, data in removed.items():
+        storage.atomic_write(archive / path.name, data)
+    return archive
 
-    out: list[Path] = []
+
+def prepare_photos(
+    lot_number: int,
+    photos: list[Path],
+    dest: Path,
+) -> tuple[dict[Path, bytes | None], list[Path]]:
+    """Encode/validate the entire new photo set without deleting or renaming."""
+    changes: dict[Path, bytes | None] = {}
+    out = []
     for i, src in enumerate(photos):
         target = dest / f"{image_name(lot_number, i)}.jpg"
-        if src in staged:
-            staged[src].rename(target)
+        if src.parent.resolve() == dest.resolve():
+            data = src.read_bytes()
+            # Also catch corrupt processed files before starting a commit.
+            with Image.open(io.BytesIO(data)) as img:
+                img.verify()
         else:
             with Image.open(src) as img:
                 img = ImageOps.exif_transpose(img).convert("RGB")
                 data = _compress(img, int(src.stat().st_size * IMAGE_SIZE_RATIO))
-            target.write_bytes(data)
+        if not target.exists() or target.read_bytes() != data:
+            changes[target] = data
         out.append(target)
-    return out
+    for old in lot_photo_files(lot_number, dest):
+        if old not in out:
+            changes[old] = None
+    return changes, out
 
 
 def _encode(img: Image.Image, quality: int) -> bytes:

@@ -9,6 +9,35 @@ lookups and research.
 uv run simple-auction
 ```
 
+## Appearance
+
+In **Settings**, turn **Dark mode** on or off and click **Save**. The change
+applies immediately and is remembered after restarting. Until you save a
+preference, the app follows your system's light/dark appearance.
+
+## Saving and recovery
+
+- Saving validates all photos and the lot-details JSON before changing files.
+  Workbooks, details and photos are committed together, with rollback if a write
+  fails. An interrupted save is recovered the next time the catalogue opens.
+  Keep any hidden `.xlsx.transaction` directory with its auction files until
+  recovery finishes; it contains the originals needed to roll back.
+- Saving and catalogue loading run on a worker thread. Edits are briefly blocked
+  while a consistent save/load finishes; longer operations show progress. Only
+  auctions whose files changed are reloaded.
+- Invalid details JSON is reported and is **not overwritten**. Repair the file
+  or restore it from your backup before editing that auction.
+- Settings are written atomically with a `.json.bak` backup. If settings cannot
+  be read, startup offers **Retry**, **Restore backup**, or **Choose folders…**.
+  Recovery preserves the damaged file as `config.json.invalid-<id>`; choosing
+  folders never deletes existing auction data. Cancel leaves everything alone.
+- Only one app instance using the same settings folder can run at a time, to
+  prevent overlapping save/recovery operations. Do not have separate app copies
+  write to the same catalogue simultaneously. Excel exports are not full backups:
+  keep backups of the main folder **and** your configured photos folder.
+- Research **Stop** cancels the HTTP request, including a wait for the first
+  response or a stalled stream. Unfinished answers do not advance the chat history.
+
 ## Development
 
 ```bash

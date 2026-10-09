@@ -1,6 +1,6 @@
 """Research a lot with Gemini (plus Google Search), as a running conversation."""
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 
 from google import genai
@@ -110,31 +110,13 @@ class ResearchChat:
         they've changed. The conversation only moves on once an answer
         completes, so a failed or stopped question can simply be asked again.
         """
-        context = describe_lot(lot)
-        content = question
-        if context != self._sent_context:
-            content = f"<lot_details>\n{context}\n</lot_details>\n\n{question}"
+        context, request = self._request(question, lot)
         if self._client is None:
             self._client = make_client()
-
-        request = {
-            "model": RESEARCH_MODEL,
-            "input": content,
-            "system_instruction": SYSTEM_PROMPT,
-            "tools": _TOOLS,
-            "stream": True,
-        }
-        if self._previous_id:
-            request["previous_interaction_id"] = self._previous_id
-
         global _search_blocked
-        if _search_blocked:
-            del request["tools"]
         try:
             stream = self._client.interactions.create(**request)
         except compat_errors.RateLimitError:
-            # The free tier has no Google Search quota on current models; the
-            # same request without search usually still works.
             if "tools" not in request:
                 raise
             del request["tools"]
@@ -142,42 +124,109 @@ class ResearchChat:
             _search_blocked = True
         if "tools" not in request:
             yield Event("no_search")
-        interaction_id = None
-        status = None
-        sources: dict[str, str] = {}
+        response = _Response()
         try:
-            for event in stream:
-                match event.event_type:
-                    case "interaction.created":
-                        interaction_id = event.interaction.id
-                    case "step.start":
-                        if event.step.type == "google_search_call":
-                            yield Event("searching")
-                        elif event.step.type == "google_search_result":
-                            yield Event("reading")
-                    case "step.delta":
-                        delta = event.delta
-                        if delta.type == "text" and delta.text:
-                            yield Event("text", delta.text)
-                        elif delta.type == "text_annotation_delta":
-                            for a in delta.annotations or []:
-                                if getattr(a, "type", None) == "url_citation" and a.url:
-                                    sources.setdefault(a.url, a.title or a.url)
-                    case "interaction.completed":
-                        status = event.interaction.status
-                        interaction_id = interaction_id or event.interaction.id
-                    case "error":
-                        message = getattr(event.error, "message", None)
-                        raise ResearchFailedError(message or "unknown error")
+            for raw in stream:
+                event = response.consume(raw)
+                if event is not None:
+                    yield event
         finally:
             close = getattr(stream, "close", None)
             if close:
                 close()
+        yield response.finish(self, context)
 
-        if status != "completed":
-            # Blocked by a safety filter, or cut off; don't build on it.
-            yield Event("refused")
-            return
-        self._previous_id = interaction_id
-        self._sent_context = context
-        yield Event("done", sources=[(t, u) for u, t in sources.items()])
+    def _request(self, question: str, lot: Lot) -> tuple[str, dict]:
+        context = describe_lot(lot)
+        content = question
+        if context != self._sent_context:
+            content = f"<lot_details>\n{context}\n</lot_details>\n\n{question}"
+        request = {
+            "model": RESEARCH_MODEL,
+            "input": content,
+            "system_instruction": SYSTEM_PROMPT,
+            "stream": True,
+        }
+        if not _search_blocked:
+            request["tools"] = _TOOLS
+        if self._previous_id:
+            request["previous_interaction_id"] = self._previous_id
+        return context, request
+
+    async def ask_async(self, question: str, lot: Lot) -> AsyncIterator[Event]:
+        """Cancelable request, including waits for headers and stalled streams.
+
+        Own clients are scoped to one event loop/turn, while conversation IDs
+        remain on this chat. Cancellation never advances an unfinished turn.
+        """
+        context, request = self._request(question, lot)
+        client = self._client or make_client()
+        owned = self._client is None
+        stream = None
+        global _search_blocked
+        try:
+            try:
+                stream = await client.aio.interactions.create(**request)
+            except compat_errors.RateLimitError:
+                if "tools" not in request:
+                    raise
+                del request["tools"]
+                stream = await client.aio.interactions.create(**request)
+                _search_blocked = True
+            if "tools" not in request:
+                yield Event("no_search")
+            response = _Response()
+            async for raw in stream:
+                event = response.consume(raw)
+                if event is not None:
+                    yield event
+            yield response.finish(self, context)
+        finally:
+            try:
+                if stream is not None:
+                    await stream.close()
+            finally:
+                if owned:
+                    try:
+                        await client.aio.aclose()
+                    finally:
+                        client.close()
+
+
+@dataclass
+class _Response:
+    interaction_id: str | None = None
+    status: str | None = None
+    sources: dict[str, str] = field(default_factory=dict)
+
+    def consume(self, event) -> Event | None:
+        match event.event_type:
+            case "interaction.created":
+                self.interaction_id = event.interaction.id
+            case "step.start":
+                if event.step.type == "google_search_call":
+                    return Event("searching")
+                if event.step.type == "google_search_result":
+                    return Event("reading")
+            case "step.delta":
+                delta = event.delta
+                if delta.type == "text" and delta.text:
+                    return Event("text", delta.text)
+                if delta.type == "text_annotation_delta":
+                    for a in delta.annotations or []:
+                        if getattr(a, "type", None) == "url_citation" and a.url:
+                            self.sources.setdefault(a.url, a.title or a.url)
+            case "interaction.completed":
+                self.status = event.interaction.status
+                self.interaction_id = self.interaction_id or event.interaction.id
+            case "error":
+                message = getattr(event.error, "message", None)
+                raise ResearchFailedError(message or "unknown error")
+        return None
+
+    def finish(self, chat: ResearchChat, context: str) -> Event:
+        if self.status != "completed":
+            return Event("refused")
+        chat._previous_id = self.interaction_id
+        chat._sent_context = context
+        return Event("done", sources=[(t, u) for u, t in self.sources.items()])

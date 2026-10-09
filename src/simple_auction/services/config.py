@@ -8,11 +8,12 @@
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from simple_auction.constants import AUCTION_STEP, PHOTO_FOLDER_NAME
-from simple_auction.services import conditions, serial_links
+from simple_auction.services import conditions, serial_links, storage
 from simple_auction.services.conditions import ConditionOption, ConditionsFileError
 from simple_auction.services.serial_links import SerialLink
 
@@ -29,6 +30,10 @@ def _default_photos_dir() -> Path:
     return _default_base_dir() / "photos"
 
 
+class ConfigFileError(ValueError):
+    """Settings need explicit recovery; never silently switch data folders."""
+
+
 @dataclass
 class Config:
     base_dir: Path = field(default_factory=_default_base_dir)
@@ -40,13 +45,15 @@ class Config:
     serial_links: list[SerialLink] = field(
         default_factory=lambda: list(serial_links.DEFAULT_LINKS)
     )
-    # Condition choices, in order; the first is the default for new lots.
+    # Condition choices, in dropdown order. New lots start with none.
     # Kept in data/conditions.yaml (see load_conditions), not config.json.
     conditions: list[ConditionOption] = field(
         default_factory=lambda: list(conditions.DEFAULT_CONDITIONS)
     )
     # Why conditions.yaml couldn't be read at startup, if it couldn't.
     conditions_error: str | None = field(default=None, compare=False)
+    # None keeps the OS theme for settings created before the manual toggle.
+    dark_mode: bool | None = None
 
     @property
     def auctions_dir(self) -> Path:
@@ -72,30 +79,80 @@ class Config:
             config = cls()
             config.conditions_error = config.load_conditions()
             return config
-        data = json.loads(path.read_text())
-        # Older versions called the main folder "auctions_dir".
-        base = data.get("base_dir") or data.get("auctions_dir") or _default_base_dir()
-        config = cls(
-            base_dir=Path(base),
-            photos_dir=Path(data.get("photos_dir", _default_photos_dir())),
-            step=int(data.get("step", AUCTION_STEP)),
-            start_at=data.get("start_at"),
-            serial_links=serial_links.from_json(data.get("serial_links")),
-        )
+        try:
+            config, data = cls._from_bytes(path.read_bytes())
+        except (ValueError, TypeError, OSError) as e:
+            raise ConfigFileError(f"Cannot load settings from {path}: {e}") from e
         # 0.1.1 kept conditions in config.json; they move to conditions.yaml.
         config.conditions_error = config.load_conditions(data.get("conditions"))
         return config
 
-    def save(self, path: Path = CONFIG_PATH) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
+    @classmethod
+    def _from_bytes(cls, raw: bytes) -> tuple[Config, dict]:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise TypeError("settings must be an object")
+        base = data.get("base_dir") or data.get("auctions_dir") or _default_base_dir()
+        photos = data.get("photos_dir", _default_photos_dir())
+        step = int(data.get("step", AUCTION_STEP))
+        start = data.get("start_at")
+        dark_mode = data.get("dark_mode")
+        if dark_mode is not None and type(dark_mode) is not bool:
+            raise TypeError("dark_mode must be true, false or null")
+        if step <= 0 or (start is not None and (type(start) is not int or start < 0)):
+            raise ValueError("invalid auction numbering settings")
+        config = cls(
+            base_dir=Path(base),
+            photos_dir=Path(photos),
+            step=step,
+            start_at=start,
+            serial_links=serial_links.from_json(data.get("serial_links")),
+            dark_mode=dark_mode,
+        )
+        return config, data
+
+    @classmethod
+    def recover(cls, path: Path, replacement: Config | None = None) -> Config:
+        """Explicit recovery: preserve damaged settings before replacing them.
+
+        Without a replacement, restore the last known-good settings backup.
+        """
+        if replacement is None:
+            raw = path.with_suffix(".json.bak").read_bytes()
+            replacement, _ = cls._from_bytes(raw)
+        else:
+            raw = replacement._encode()
+        if path.exists():
+            preserved = path.with_name(f"{path.name}.invalid-{uuid.uuid4().hex}")
+            storage.atomic_write(preserved, path.read_bytes())
+        storage.atomic_write(path, raw)
+        replacement.conditions_error = replacement.load_conditions()
+        return replacement
+
+    def _encode(self) -> bytes:
         data = {
             "base_dir": str(self.base_dir),
             "photos_dir": str(self.photos_dir),
             "step": self.step,
             "start_at": self.start_at,
             "serial_links": serial_links.to_json(self.serial_links),
+            "dark_mode": self.dark_mode,
         }
-        path.write_text(json.dumps(data, indent=2))
+        return json.dumps(data, indent=2).encode("utf-8")
+
+    def save(self, path: Path = CONFIG_PATH) -> None:
+        raw = self._encode()
+        self._from_bytes(raw)  # validate before replacing any settings
+        if path.exists():
+            previous = path.read_bytes()
+            try:
+                self._from_bytes(previous)
+            except ValueError, TypeError:
+                raise ConfigFileError(
+                    f"Cannot overwrite damaged settings at {path}; recover them first."
+                ) from None
+            storage.atomic_write(path.with_suffix(".json.bak"), previous)
+        storage.atomic_write(path, raw)
 
     def load_conditions(self, legacy: object = None) -> str | None:
         """Read data/conditions.yaml into `conditions`.

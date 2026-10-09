@@ -84,10 +84,11 @@ def _is_dark() -> bool:
     return QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
 
 
-def apply(app: QApplication) -> None:
-    """Apply the light or dark theme, matching the OS setting."""
+def apply(app: QApplication, *, dark_mode: bool | None = None) -> None:
+    """Apply an explicit theme, or follow the OS when no override is saved."""
     global _current
-    _current = DARK if _is_dark() else LIGHT
+    dark = _is_dark() if dark_mode is None else dark_mode
+    _current = DARK if dark else LIGHT
     app.setStyle("Fusion")
     app.setPalette(_palette(_current))
     app.setStyleSheet(_stylesheet(_current))

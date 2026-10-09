@@ -3,6 +3,8 @@ import logging
 import shutil
 import subprocess
 from collections import defaultdict
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -26,6 +28,7 @@ from simple_auction.constants import APP_NAME, AUTOSAVE_MS, AUTOSAVE_RETRY_MS
 from simple_auction.models import Lot
 from simple_auction.services import (
     api_key,
+    catalogue,
     excel,
     importer,
     listing,
@@ -37,9 +40,10 @@ from simple_auction.services import (
 )
 from simple_auction.services.config import Config
 from simple_auction.services.excel import ExcelLockedError
-from simple_auction.services.image import lot_photo_files, process_photos
+from simple_auction.services.image import archive_removed, lot_photo_files
 from simple_auction.services.updates import is_frozen
 from simple_auction.ui import strings, theme
+from simple_auction.ui.background import run_io
 from simple_auction.ui.components.lot_form import LotForm
 from simple_auction.ui.components.lot_sidebar import LotSidebar, Selection
 from simple_auction.ui.components.research_panel import ResearchPanel
@@ -64,6 +68,9 @@ class MainPage(QMainWindow):
         self.config = config
         self.auction_no: int | None = None
         self.lot_no: int | None = None
+        self._io_busy = False
+        self._save_error: Exception | None = None
+        self._catalogue_cache = catalogue.Cache()
 
         self.setWindowTitle(APP_NAME)
         self.resize(*theme.WINDOW_SIZE)
@@ -145,16 +152,62 @@ class MainPage(QMainWindow):
     def _details(self, auction_no: int) -> Path:
         return lot_details.details_path(self.config.data_dir, auction_no)
 
+    def _io(self, label: str, operation):
+        if self._io_busy:
+            raise RuntimeError("A catalogue operation is already in progress")
+        self._io_busy = True
+        try:
+            return run_io(self, label, operation)
+        finally:
+            self._io_busy = False
+
     def _lots(self, auction_no: int) -> list[Lot]:
-        lots = excel.load_auction(self._path(auction_no))
-        lot_details.fill(self._details(auction_no), lots)
-        return lots
+        path, details = self._path(auction_no), self._details(auction_no)
+        return self._io(
+            strings.IO_LOADING, lambda: self._catalogue_cache.load(path, details)
+        )
 
     def refresh(self) -> None:
         folder = self.config.auctions_dir
-        self.sidebar.populate(
-            {no: self._lots(no) for no in excel.list_auctions(folder)}
+        data_dir = self.config.data_dir
+
+        def load_all():
+            auctions, errors = {}, []
+            for no in excel.list_auctions(folder):
+                try:
+                    auctions[no] = self._catalogue_cache.load(
+                        excel.auction_path(folder, no),
+                        lot_details.details_path(data_dir, no),
+                    )
+                except (catalogue.CatalogueReadError, OSError) as e:
+                    auctions[no] = []
+                    errors.append((no, e))
+            return auctions, errors
+
+        auctions, errors = self._io(strings.IO_LOADING, load_all)
+        self.sidebar.populate(auctions)
+        for no, error in errors:
+            self._read_error(no, error)
+
+    def _read_error(self, auction_no: int, error: Exception) -> None:
+        log.error("Loading auction %s failed: %s", auction_no, error)
+        QMessageBox.warning(
+            self,
+            strings.ERROR_TITLE,
+            strings.CATALOGUE_READ_FAILED.format(n=auction_no, error=error),
         )
+
+    def _recycle(self, removed: dict[Path, bytes], folder: Path) -> None:
+        if not removed:
+            return
+        try:
+            archive = self._io(
+                strings.IO_DELETING, lambda: archive_removed(removed, folder)
+            )
+            self._trash(archive)
+        except OSError as e:
+            log.exception("Archiving removed photos failed")
+            QMessageBox.warning(self, strings.DELETE, str(e))
 
     def _status(self, text: str) -> None:
         self.statusBar().showMessage(text, STATUS_MS)
@@ -201,45 +254,67 @@ class MainPage(QMainWindow):
 
     def flush(self) -> bool:
         """Save the open lot if it has edits. Returns False if saving failed."""
+        if self._io_busy:
+            self._autosave.start(AUTOSAVE_RETRY_MS)
+            return False
         self._autosave.stop()
         if self.auction_no is None or not self.form.is_dirty():
             return True
         auction_no = self.auction_no
         lot = listing.apply_condition(self.form.collect(), self.config.conditions)
         path = self._path(auction_no)
-        new_photos = any(p.parent != self._images_dir(auction_no) for p in lot.photos)
-        if new_photos:  # compressing can take a moment
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        details, images = self._details(auction_no), self._images_dir(auction_no)
         try:
-            photos = process_photos(
-                lot.lot_number, lot.photos, self._images_dir(auction_no), self._trash
+            photos, removed = self._io(
+                strings.IO_SAVING,
+                lambda: catalogue.save(path, details, images, lot),
             )
-            excel.save_lot(path, lot)
-            lot_details.save(self._details(auction_no), lot)
-        except ExcelLockedError:
+        except ExcelLockedError as e:
+            self._save_error = e
             self.form.set_save_state(
                 "error", strings.SAVE_LOCKED_INLINE.format(file=path.name)
             )
+            self.form.save_state.setToolTip(str(e))
             self._autosave.start(AUTOSAVE_RETRY_MS)
             return False
-        except Exception:
+        except Exception as e:
+            self._save_error = e
             log.exception("Saving lot %s failed", lot.lot_number)
-            self.form.set_save_state("error", strings.SAVE_FAILED_INLINE)
+            summary = str(e).splitlines()[0] if str(e) else type(e).__name__
+            if len(summary) > 48:
+                summary = summary[:45] + "…"
+            self.form.set_save_state(
+                "error", strings.SAVE_ERROR_INLINE.format(error=summary)
+            )
+            self.form.save_state.setToolTip(str(e))
             return False
-        finally:
-            if new_photos:
-                QApplication.restoreOverrideCursor()
+        self._save_error = None
+        self.form.save_state.setToolTip("")
         if photos != lot.photos:
             self.form.set_photos(photos)
         self.form.mark_saved()
         self.sidebar.update_title(auction_no, lot.lot_number, lot.title)
+        self._recycle(removed, images)
         return True
+
+    def _save_warning(self) -> None:
+        if isinstance(self._save_error, ExcelLockedError):
+            self._locked_warning()
+        else:
+            QMessageBox.warning(
+                self,
+                strings.ERROR_TITLE,
+                strings.SAVE_FAILED_DETAIL.format(
+                    n=self.lot_no,
+                    error=self._save_error or "A save is already in progress",
+                ),
+            )
 
     def _leave_lot(self) -> bool:
         """Save before moving away from the open lot; warn and stay if it fails."""
         if self.flush():
             return True
-        self._locked_warning()
+        self._save_warning()
         if self.auction_no is not None and self.lot_no is not None:
             self.sidebar.select(self.auction_no, self.lot_no)
         return False
@@ -285,11 +360,19 @@ class MainPage(QMainWindow):
                 )
             )
 
-    def _on_startup_update_checked(self, info) -> None:
+    def _on_startup_update_checked(self, info, _error: str = "") -> None:
+        if self._io_busy:
+            QTimer.singleShot(
+                300, lambda: self._on_startup_update_checked(info, _error)
+            )
+            return
         if info is not None and info.is_newer:
             UpdateDialog(self, info).exec()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._io_busy:
+            event.ignore()
+            return
         self._ui_state.setValue("splitter", self.splitter.saveState())
         thread = self._startup_update_thread
         if thread is not None and thread.isRunning():
@@ -299,6 +382,7 @@ class MainPage(QMainWindow):
             keep_until_finished(thread)
         self._startup_update_thread = None
         if self.flush():
+            self.research.reset(None)
             event.accept()
             return
         box = QMessageBox(self)
@@ -306,7 +390,9 @@ class MainPage(QMainWindow):
         box.setWindowTitle(strings.UNSAVED_TITLE)
         box.setText(
             strings.UNSAVED_BODY.format(
-                n=self.lot_no, file=self._path(self.auction_no).name
+                n=self.lot_no,
+                file=self._path(self.auction_no).name,
+                error=self._save_error,
             )
         )
         quit_btn = box.addButton(
@@ -315,6 +401,7 @@ class MainPage(QMainWindow):
         box.addButton(QMessageBox.StandardButton.Cancel)
         box.exec()
         if box.clickedButton() is quit_btn:
+            self.research.reset(None)
             event.accept()
         else:
             event.ignore()
@@ -343,13 +430,18 @@ class MainPage(QMainWindow):
             lot_no = numbering.next_lot(
                 self._lots(auction_no), auction_no, self.config.step
             )
+        except (catalogue.CatalogueReadError, OSError) as e:
+            self._read_error(auction_no, e)
+            return
         except ValueError as e:
             QMessageBox.warning(self, strings.AUCTION_FULL_TITLE, str(e))
             return
-        first = self.config.conditions[0].name if self.config.conditions else ""
-        lot = Lot(lot_number=lot_no, condition=first)
+        # No condition until someone picks one, so nothing is added to the
+        # title or description before then (same as imported lots).
+        lot = Lot(lot_number=lot_no)
         try:
-            excel.save_lot(self._path(auction_no), lot)
+            path, details = self._path(auction_no), self._details(auction_no)
+            self._io(strings.IO_SAVING, lambda: catalogue.add(path, details, [lot]))
         except ExcelLockedError:
             self._locked_warning()
             return
@@ -363,9 +455,15 @@ class MainPage(QMainWindow):
             return
         if not self._leave_lot():
             return
-        lot = next(
-            (x for x in self._lots(auction_no) if x.lot_number == lot_number), None
-        )
+        try:
+            lot = next(
+                (x for x in self._lots(auction_no) if x.lot_number == lot_number), None
+            )
+        except (catalogue.CatalogueReadError, OSError) as e:
+            self._read_error(auction_no, e)
+            if self.auction_no is not None and self.lot_no is not None:
+                self.sidebar.select(self.auction_no, self.lot_no)
+            return
         if lot is None:
             return
         lot.photos = lot_photo_files(lot_number, self._images_dir(auction_no))
@@ -410,14 +508,19 @@ class MainPage(QMainWindow):
 
         for auction_no, numbers in lots.items():
             try:
-                excel.delete_lots(self._path(auction_no), numbers)
+                path, details, images = (
+                    self._path(auction_no),
+                    self._details(auction_no),
+                    self._images_dir(auction_no),
+                )
+                removed = self._io(
+                    strings.IO_DELETING,
+                    partial(catalogue.delete, path, details, images, numbers),
+                )
             except ExcelLockedError:
                 self._locked_warning()
                 continue
-            lot_details.delete(self._details(auction_no), numbers)
-            for n in numbers:
-                for photo in lot_photo_files(n, self._images_dir(auction_no)):
-                    self._trash(photo)
+            self._recycle(removed, images)
             if self.auction_no == auction_no and self.lot_no in numbers:
                 self._clear()
 
@@ -510,11 +613,13 @@ class MainPage(QMainWindow):
             return
         auction_no, lots = dialog.auction_no(), dialog.lots()
         try:
-            added = excel.add_lots(self._path(auction_no), lots)
+            workbook, details = self._path(auction_no), self._details(auction_no)
+            added = self._io(
+                strings.IO_IMPORTING, lambda: catalogue.add(workbook, details, lots)
+            )
         except ExcelLockedError:
             self._locked_warning()
             return
-        lot_details.save_many(self._details(auction_no), added)
 
         self.refresh()
         if added:
@@ -538,6 +643,9 @@ class MainPage(QMainWindow):
             watcher.addPath(str(self.config.conditions_path))
 
     def _reload_conditions(self) -> None:
+        if self._io_busy:
+            QTimer.singleShot(300, self._reload_conditions)
+            return
         before = list(self.config.conditions)
         error = self.config.load_conditions()
         self._watch_conditions()  # editors that replace the file drop the watch
@@ -549,6 +657,9 @@ class MainPage(QMainWindow):
             self._status(strings.CONDITIONS_RELOADED)
 
     def _conditions_problem(self, error: str) -> None:
+        if self._io_busy:
+            QTimer.singleShot(300, lambda: self._conditions_problem(error))
+            return
         QMessageBox.warning(
             self,
             strings.CONDITIONS_FILE_ERROR_TITLE,
@@ -582,7 +693,10 @@ class MainPage(QMainWindow):
                 # someone added to conditions.yaml aren't lost.
                 self.config.conditions = conditions
                 self.config.save_conditions()
-            self.config.save()
+            chosen_dark = dialog.dark_mode()
+            replace(self.config, dark_mode=chosen_dark).save()
+            self.config.dark_mode = chosen_dark
+            theme.apply(QApplication.instance(), dark_mode=chosen_dark)
             self._watch_conditions()
             self.form.set_serial_links(self.config.serial_links)
             self.form.set_conditions(self.config.conditions)

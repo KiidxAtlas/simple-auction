@@ -58,7 +58,8 @@ def test_update_dialog_opens_in_every_state(app, info, monkeypatch):
     monkeypatch.setattr(update_dialog.UpdateCheckThread, "start", lambda self: None)
     dialog = UpdateDialog(None, info)
     if info is None:
-        dialog._on_check_complete(None)  # what a failed network check shows
+        # What a failed check shows, with its reason.
+        dialog._on_check_complete(None, "Couldn't reach GitHub (timed out).")
     dialog.show()
     app.processEvents()
     _dispose(app, dialog)

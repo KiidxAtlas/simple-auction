@@ -13,6 +13,8 @@ import logging
 import os
 import platform
 import re
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -115,70 +117,86 @@ def launch_windows_installer(installer_path: Path) -> bool:
     return True
 
 
-def check_for_updates(timeout: int = 10) -> UpdateInfo | None:
+class UpdateCheckError(Exception):
+    """The update check failed; the message says why, in plain words."""
+
+
+def describe_network_error(exc: BaseException) -> str:
+    """A readable reason for a failed request (shown to the user)."""
+    if isinstance(exc, urllib.error.HTTPError):
+        if exc.code in (403, 429):
+            return "GitHub is limiting requests right now. Try again in an hour."
+        if exc.code == 404:
+            return "No published release was found on GitHub."
+        return f"GitHub answered with an error ({exc.code} {exc.reason})."
+    reason = getattr(exc, "reason", exc)
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        detail = reason.verify_message or str(reason)
+        return f"The secure connection to GitHub couldn't be verified ({detail})."
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return "GitHub didn't answer in time."
+    return f"Couldn't reach GitHub ({reason})."
+
+
+def check_for_updates(timeout: int = 10) -> UpdateInfo:
     """Check GitHub releases for a newer version.
 
     Returns UpdateInfo for the latest release (``is_newer`` says whether it's
-    newer than this copy), or None if the check failed or the release has no
-    file for this platform.
+    newer than this copy). Raises UpdateCheckError, with a readable reason,
+    if the check fails or the release has no file for this platform.
     """
+    url = f"https://api.github.com/repos/{_REPO_OWNER}/{_REPO_NAME}/releases/latest"
+    req = urllib.request.Request(url)
+    req.add_header("Accept", "application/vnd.github.v3+json")
+    req.add_header("User-Agent", _USER_AGENT)
     try:
-        url = f"https://api.github.com/repos/{_REPO_OWNER}/{_REPO_NAME}/releases/latest"
-        req = urllib.request.Request(url)
-        req.add_header("Accept", "application/vnd.github.v3+json")
-        req.add_header("User-Agent", _USER_AGENT)
-
         with urllib.request.urlopen(req, timeout=timeout) as response:
             data = json.loads(response.read().decode())
+    except (urllib.error.URLError, OSError) as exc:
+        _LOG.warning("Network error checking for updates: %r", exc)
+        raise UpdateCheckError(describe_network_error(exc)) from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        _LOG.warning("Invalid response from the GitHub API: %s", exc)
+        raise UpdateCheckError("GitHub sent an unexpected answer.") from exc
 
-        latest_version = data.get("tag_name", "").lstrip("v")
-        release_notes = (data.get("body") or "").strip()
+    if not isinstance(data, dict) or not data.get("tag_name"):
+        _LOG.warning("No tag_name in release response")
+        raise UpdateCheckError("GitHub sent an unexpected answer.")
+    latest_version = str(data["tag_name"]).lstrip("v")
+    release_notes = (data.get("body") or "").strip()
+    is_newer = _compare_versions(latest_version, __version__) > 0
 
-        if not latest_version:
-            _LOG.warning("No tag_name in release response")
-            return None
-
-        is_newer = _compare_versions(latest_version, __version__) > 0
-
-        assets = data.get("assets", [])
-        download_url = _get_download_url_for_platform(assets)
-
-        if not download_url:
-            _LOG.warning("No release asset found for platform %s", platform.system())
-            return None
-
-        selected: dict[str, Any] = next(
-            (
-                asset
-                for asset in assets
-                if asset.get("browser_download_url") == download_url
-            ),
-            {},
+    assets = data.get("assets") or []
+    download_url = _get_download_url_for_platform(assets)
+    if not download_url:
+        _LOG.warning("No release asset found for platform %s", platform.system())
+        raise UpdateCheckError(
+            f"Version {latest_version} has no installer for this computer."
         )
-        digest = str(selected.get("digest") or "")
-        sha256 = (
-            _normalize_sha256(digest.split(":", 1)[1])
-            if digest.lower().startswith("sha256:")
-            else None
-        )
-        if not sha256:
-            sha256 = _sha256_from_sidecar(selected, assets, timeout)
-        return UpdateInfo(
-            version=latest_version,
-            url=download_url,
-            release_notes=release_notes,
-            is_newer=is_newer,
-            sha256=sha256,
-        )
-    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
-        _LOG.warning("Network error checking for updates: %s", exc)
-        return None
-    except (json.JSONDecodeError, KeyError) as exc:
-        _LOG.warning("Invalid response format from GitHub API: %s", exc)
-        return None
-    except (TypeError, ValueError) as exc:
-        _LOG.error("Unexpected error checking for updates: %s", exc)
-        return None
+
+    selected: dict[str, Any] = next(
+        (
+            asset
+            for asset in assets
+            if asset.get("browser_download_url") == download_url
+        ),
+        {},
+    )
+    digest = str(selected.get("digest") or "")
+    sha256 = (
+        _normalize_sha256(digest.split(":", 1)[1])
+        if digest.lower().startswith("sha256:")
+        else None
+    )
+    if not sha256:
+        sha256 = _sha256_from_sidecar(selected, assets, timeout)
+    return UpdateInfo(
+        version=latest_version,
+        url=download_url,
+        release_notes=release_notes,
+        is_newer=is_newer,
+        sha256=sha256,
+    )
 
 
 def _normalize_sha256(value: str) -> str | None:

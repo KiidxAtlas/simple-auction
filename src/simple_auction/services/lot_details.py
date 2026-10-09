@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from simple_auction.models import Lot
+from simple_auction.services import storage
 
 _FIELDS = ("make", "model")
 
@@ -13,19 +14,57 @@ def details_path(folder: Path, auction_no: int) -> Path:
     return folder / f"{auction_no} details.json"
 
 
+class DetailsFileError(ValueError):
+    """The details file cannot safely be read or overwritten."""
+
+
 def _read(path: Path) -> dict[str, dict[str, str]]:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text())
-    except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as e:
+        raise DetailsFileError(
+            f"Cannot read {path}: {e}. The file was not overwritten."
+        ) from e
+    if not isinstance(data, dict) or any(
+        not isinstance(key, str)
+        or not isinstance(entry, dict)
+        or any(not isinstance(value, str) for value in entry.values())
+        for key, entry in data.items()
+    ):
+        raise DetailsFileError(
+            f"Invalid details in {path}. The file was not overwritten."
+        )
+    return data
 
 
 def _write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True))
+    storage.atomic_write(path, _encode(data))
+
+
+def _encode(data: dict) -> bytes:
+    return json.dumps(data, indent=2, sort_keys=True).encode("utf-8")
+
+
+def prepare(path: Path, lots: list[Lot]) -> bytes:
+    """Validate and encode updates without modifying the sidecar."""
+    data = _read(path)
+    for lot in lots:
+        entry = {name: getattr(lot, name) for name in _FIELDS if getattr(lot, name)}
+        if entry:
+            data[str(lot.lot_number)] = entry
+        else:
+            data.pop(str(lot.lot_number), None)
+    return _encode(data)
+
+
+def prepare_delete(path: Path, lot_numbers: set[int]) -> bytes:
+    data = _read(path)
+    for number in lot_numbers:
+        data.pop(str(number), None)
+    return _encode(data)
 
 
 def fill(path: Path, lots: list[Lot]) -> None:
@@ -37,28 +76,14 @@ def fill(path: Path, lots: list[Lot]) -> None:
 
 
 def save(path: Path, lot: Lot) -> None:
-    data = _read(path)
-    entry = {name: getattr(lot, name) for name in _FIELDS if getattr(lot, name)}
-    key = str(lot.lot_number)
-    if entry:
-        data[key] = entry
-    else:
-        data.pop(key, None)
-    if data or path.exists():
-        _write(path, data)
+    save_many(path, [lot])
 
 
 def save_many(path: Path, lots: list[Lot]) -> None:
     """Like save() for each lot, with one read and one write."""
-    data = _read(path)
-    for lot in lots:
-        entry = {name: getattr(lot, name) for name in _FIELDS if getattr(lot, name)}
-        if entry:
-            data[str(lot.lot_number)] = entry
-        else:
-            data.pop(str(lot.lot_number), None)
-    if data or path.exists():
-        _write(path, data)
+    data = prepare(path, lots)
+    if data != b"{}" or path.exists():
+        storage.atomic_write(path, data)
 
 
 def delete(path: Path, lot_numbers: set[int]) -> None:

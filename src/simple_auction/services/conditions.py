@@ -22,7 +22,7 @@ FILE_HEADER = """\
 #
 # One per line:   Name: text added to the description
 #   - The order here is the order in the Condition dropdown.
-#   - The first one is the default for new lots.
+#   - New lots start with no condition until one is picked.
 #   - Picking a condition adds " - Name" to the title and
 #     "Condition: Name. <text>" to the end of the description.
 #   - Leave the text empty (just "Name:") to add only "Condition: Name."
