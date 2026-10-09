@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed
+
+- Conditions now live in `data/conditions.yaml` in the main folder, one
+  `Name: text` per line, so they're easy to edit in any text editor. Saved
+  changes show up in the app right away; a mistake in the file is reported
+  (with its line number) and the previous conditions stay in use. Settings
+  has an **Open file…** button, and the table there still works. Conditions
+  saved by 0.1.1 move to the file automatically.
+- Imported lots start with no condition ("Pick a condition"), and their
+  title and description are left exactly as imported until someone picks
+  one. A spreadsheet's condition column is only used if you choose it in
+  the import window.
+
 ## 0.1.1 — 2026-10-09
 
 ### Added

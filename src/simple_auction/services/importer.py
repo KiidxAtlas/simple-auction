@@ -195,14 +195,14 @@ def _keyword_condition(text: str) -> str | None:
 def parse_condition(text: str, names: list[str]) -> str:
     """Match spreadsheet condition text to one of the configured `names`.
 
-    Exact name, then usual wording ("NIB" -> Like New) if that condition is
+    Blank stays blank. Exact name, then usual wording ("NIB" -> Like New) if that condition is
     configured, then a configured name inside the text ("Good+"). Anything
     else is kept as written, so no information is lost.
     """
     text = " ".join(text.split())
     by_lower = {n.lower(): n for n in names}
     if not text:
-        return names[0] if names else ""
+        return ""  # left for someone to pick in the app
     if text.lower() in by_lower:
         return by_lower[text.lower()]
     keyword = _keyword_condition(text)

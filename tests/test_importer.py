@@ -139,7 +139,7 @@ def test_parse_condition_matches_configured_names():
     assert parse_condition("Good+, light wear", names) == "Good"  # name in text
     assert parse_condition("Worn", names) == "Worn"  # "Fair" not configured
     assert parse_condition("as pictured", names) == "as pictured"  # kept as is
-    assert parse_condition("", names) == "Mint"  # blank -> default
+    assert parse_condition("", names) == ""  # blank stays blank
 
 
 def test_parse_condition_uses_wording_for_default_names():

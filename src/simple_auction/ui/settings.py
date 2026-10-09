@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from simple_auction.services import api_key, lookup, numbering
-from simple_auction.services.conditions import ConditionOption, cleaned
+from simple_auction.services.conditions import ConditionOption, cleaned, save_file
 from simple_auction.services.config import Config
 from simple_auction.services.serial_links import SerialLink, is_valid
 from simple_auction.ui import strings
@@ -87,8 +87,10 @@ class SettingsDialog(QDialog):
             QAbstractItemView.SelectionBehavior.SelectRows
         )
         self.conditions_table.setFixedHeight(160)
+        self._original_conditions = list(config.conditions)
         for option in config.conditions:
             self._add_condition_row(option.name, option.note)
+        self._conditions_path = config.conditions_path
         add_condition = QPushButton(strings.ADD_LINK)
         add_condition.clicked.connect(self._new_condition)
         remove_condition = QPushButton(strings.REMOVE_LINK)
@@ -99,8 +101,12 @@ class SettingsDialog(QDialog):
         down.clicked.connect(lambda: self._move_condition(1))
         conditions_hint = QLabel(strings.CONDITIONS_HINT)
         conditions_hint.setObjectName("hint")
+        open_file = QPushButton(strings.OPEN_CONDITIONS_FILE)
+        open_file.setToolTip(strings.OPEN_CONDITIONS_FILE_TIP)
+        open_file.clicked.connect(self._open_conditions_file)
         conditions_row = QHBoxLayout()
         conditions_row.addWidget(conditions_hint, 1)
+        conditions_row.addWidget(open_file)
         for button in (up, down, add_condition, remove_condition):
             conditions_row.addWidget(button)
 
@@ -203,6 +209,18 @@ class SettingsDialog(QDialog):
             {i.row() for i in self.links.selectedIndexes()}, reverse=True
         ):
             self.links.removeRow(row)
+
+    def original_conditions(self) -> list[ConditionOption]:
+        return list(self._original_conditions)
+
+    def _open_conditions_file(self) -> None:
+        """Open conditions.yaml in the default text editor (or show it in the
+        folder if no app is set up to open .yaml files)."""
+        path = self._conditions_path
+        if not path.exists():
+            save_file(path, self._original_conditions)
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
     def conditions(self) -> list[ConditionOption]:
         """The condition rows, in order (blank and repeated names dropped)."""

@@ -182,6 +182,7 @@ class LotForm(QWidget):
         self.year.setMaxLength(4)
         self.serial.editingFinished.connect(self._on_serial_done)
         self.condition = QComboBox()
+        self.condition.setPlaceholderText(strings.PICK_CONDITION)
         self.condition.activated.connect(self._apply_condition)
         self.make = QLineEdit()
         self.make.setPlaceholderText(strings.MAKE_PLACEHOLDER)
@@ -483,6 +484,10 @@ class LotForm(QWidget):
         so the text shows up immediately rather than on save.
         """
         condition = self._condition()
+        if not condition:
+            # Nothing picked yet (e.g. an imported lot): leave the text alone.
+            self._applied_condition = ""
+            return
         known = self._known_conditions()
         title = condition_title(self.title.text(), condition, known)
         if title != self.title.text():

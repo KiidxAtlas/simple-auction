@@ -5,7 +5,14 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
-from PySide6.QtCore import QFile, QSettings, Qt, QThread, QTimer
+from PySide6.QtCore import (
+    QFile,
+    QFileSystemWatcher,
+    QSettings,
+    Qt,
+    QThread,
+    QTimer,
+)
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -112,6 +119,18 @@ class MainPage(QMainWindow):
             help_menu = self.menuBar().addMenu(strings.MENU_HELP)
             help_menu.addAction(strings.MENU_CHECK_UPDATES, self.check_for_updates)
             QTimer.singleShot(STARTUP_UPDATE_DELAY_MS, self._startup_update_check)
+
+        # conditions.yaml can be edited in any text editor while the app runs.
+        self._conditions_watcher = QFileSystemWatcher(self)
+        self._conditions_watcher.fileChanged.connect(
+            # Editors often save in several steps; read once they're done.
+            lambda _path: QTimer.singleShot(300, self._reload_conditions)
+        )
+        self._watch_conditions()
+        if config.conditions_error:
+            QTimer.singleShot(
+                0, lambda: self._conditions_problem(config.conditions_error)
+            )
 
         self.refresh()
 
@@ -509,14 +528,46 @@ class MainPage(QMainWindow):
         else:
             self._status(strings.IMPORTED_NONE.format(n=auction_no))
 
+    # -- conditions.yaml ----------------------------------------------------
+
+    def _watch_conditions(self) -> None:
+        watcher = self._conditions_watcher
+        if watcher.files():
+            watcher.removePaths(watcher.files())
+        if self.config.conditions_path.exists():
+            watcher.addPath(str(self.config.conditions_path))
+
+    def _reload_conditions(self) -> None:
+        before = list(self.config.conditions)
+        error = self.config.load_conditions()
+        self._watch_conditions()  # editors that replace the file drop the watch
+        if error:
+            self._conditions_problem(error)
+            return
+        if self.config.conditions != before:
+            self.form.set_conditions(self.config.conditions)
+            self._status(strings.CONDITIONS_RELOADED)
+
+    def _conditions_problem(self, error: str) -> None:
+        QMessageBox.warning(
+            self,
+            strings.CONDITIONS_FILE_ERROR_TITLE,
+            strings.CONDITIONS_FILE_ERROR.format(error=error),
+        )
+
     def open_settings(self) -> None:
         if not self._leave_lot():
             return
         existing = excel.list_auctions(self.config.auctions_dir)
         dialog = SettingsDialog(self.config, existing, self)
         if dialog.exec():
+            old_base = self.config.base_dir
             self.config.base_dir = dialog.base_dir()
             self.config.move_old_files()
+            # A new main folder has (or gets) its own conditions.yaml.
+            moved = self.config.base_dir != old_base
+            if moved and (error := self.config.load_conditions()):
+                self._conditions_problem(error)
             self.config.photos_dir = dialog.photos_dir()
             # Only remember the number if it differs from what the files give.
             from_files = numbering.next_auction(
@@ -525,8 +576,14 @@ class MainPage(QMainWindow):
             chosen = dialog.next_auction()
             self.config.start_at = None if chosen == from_files else chosen
             self.config.serial_links = dialog.serial_links()
-            self.config.conditions = dialog.conditions()
+            conditions = dialog.conditions()
+            if conditions != dialog.original_conditions():
+                # Only rewrite the file when the table changed, so comments
+                # someone added to conditions.yaml aren't lost.
+                self.config.conditions = conditions
+                self.config.save_conditions()
             self.config.save()
+            self._watch_conditions()
             self.form.set_serial_links(self.config.serial_links)
             self.form.set_conditions(self.config.conditions)
             if key := dialog.new_api_key():

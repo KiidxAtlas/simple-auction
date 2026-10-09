@@ -80,6 +80,9 @@ class ImportDialog(QDialog):
 
         # Auction number, guessed from the lot numbers or the file name.
         mapping = importer.guess_mapping(sheet.headers)
+        # Imported lots start with no condition; someone picks it in the app.
+        # The column can still be chosen here on purpose.
+        mapping["condition"] = None
         numbers = importer.lot_numbers(sheet, mapping["lot_number"])
         guess = importer.guess_auction_number(path, numbers, step)
         self.auction = QLineEdit(str(guess or suggested_auction))

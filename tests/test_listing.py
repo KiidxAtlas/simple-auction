@@ -104,3 +104,14 @@ def test_conditions_cleaned_and_saved():
     assert from_json(to_json(DEFAULT_CONDITIONS)) == DEFAULT_CONDITIONS
     assert from_json(None) == DEFAULT_CONDITIONS
     assert from_json([]) == []
+
+
+def test_no_condition_leaves_lot_alone():
+    """An imported lot with no condition picked keeps its old text as is."""
+    lot = Lot(
+        1,
+        title="Colt 1911 - Good",
+        desc="Blued.\n\nCondition: Good. From the old catalogue.",
+        condition="",
+    )
+    assert apply_condition(lot, DEFAULT_CONDITIONS) == lot

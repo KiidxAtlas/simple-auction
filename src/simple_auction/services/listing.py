@@ -98,9 +98,12 @@ def make_model_desc(desc: str, make: str, model: str) -> str:
 def apply_condition(lot: Lot, options: list[ConditionOption]) -> Lot:
     """Condition suffix on the title and sentence in the description.
 
+    With no condition picked, the lot is left exactly as it is.
     A condition that's no longer in the list (renamed or removed in Settings)
     keeps its title suffix, and its description text is left alone.
     """
+    if not lot.condition:
+        return lot  # nothing picked yet: leave title and description alone
     known = [o.name for o in options]
     option = find_option(options, lot.condition)
     desc = lot.desc
