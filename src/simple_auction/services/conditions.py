@@ -10,6 +10,7 @@ changes while it runs. A lot stores its condition as plain text, so lots keep
 their condition even after it's renamed or removed from the list.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,8 @@ FILE_HEADER = """\
 #   - Leave the text empty (just "Name:") to add only "Condition: Name."
 #   - Put quotes around a name or text that contains a colon, e.g.
 #     "Good: see notes": Some wear.
+#   - Percentages such as 80% are fine. Descriptions starting with % are
+#     treated as literal text too; generated descriptions are safely quoted.
 #
 # Save the file and the app updates right away.
 
@@ -83,6 +86,15 @@ DEFAULT_CONDITIONS = [
     ),
 ]
 
+# Only this exact, unmodified starter list is eligible for automatic migration.
+# Custom names, notes, ordering, and intentionally empty lists are preserved.
+LEGACY_DEFAULT_CONDITIONS = [
+    ConditionOption("Like New", "Appears unfired or barely used, no notable wear."),
+    ConditionOption("Excellent", "Light handling marks, bore bright."),
+    ConditionOption("Good", "Normal wear and handling marks consistent with use."),
+    ConditionOption("Fair", "Noticeable wear, finish loss or marks. See photos."),
+]
+
 
 def cleaned(options: list[ConditionOption]) -> list[ConditionOption]:
     """Drop rows without a name and repeated names (first one wins)."""
@@ -112,11 +124,25 @@ def from_json(data: object) -> list[ConditionOption]:
     )
 
 
+def _quote_percent_notes(source: str) -> str:
+    """Accept leading % in the editable Name: text format, not YAML directives.
+
+    YAML reserves % at the start of a scalar. Treat it as description text
+    only after a mapping key; leave all other YAML syntax and errors intact.
+    """
+    return re.sub(
+        r"^(?P<key>[ \t]*(?:[^\s:#\"'\n][^:\n]*|\"[^\"\n]*\"|'[^'\n]*'):[ \t]*)(?P<note>%[^\r\n]*)$",
+        lambda match: match["key"] + _scalar(match["note"]),
+        source,
+        flags=re.MULTILINE,
+    )
+
+
 def load_file(path: Path) -> list[ConditionOption]:
     """Read conditions.yaml. Raises ConditionsFileError with a readable
     message if the file is missing, isn't valid YAML, or has the wrong shape."""
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = yaml.safe_load(_quote_percent_notes(path.read_text(encoding="utf-8")))
     except OSError as e:
         raise ConditionsFileError(f"Couldn't read {path.name}: {e}") from e
     except yaml.YAMLError as e:
@@ -151,16 +177,18 @@ def load_file(path: Path) -> list[ConditionOption]:
     )
 
 
-def _scalar(text: str) -> str:
-    """One YAML value, quoted only when it has to be (colons, '#', etc.)."""
-    dumped = yaml.safe_dump(text, allow_unicode=True, width=1000)
+def _scalar(text: str, *, quote: bool = False) -> str:
+    """One YAML value, optionally always quoted for editable descriptions."""
+    dumped = yaml.safe_dump(
+        text, allow_unicode=True, width=1000, default_style='"' if quote else None
+    )
     return dumped.removesuffix("\n").removesuffix("\n...").strip()
 
 
 def save_file(path: Path, options: list[ConditionOption]) -> None:
     """Write conditions.yaml, one "Name: text" line each, under the header."""
     lines = [
-        f"{_scalar(o.name)}: {_scalar(o.note)}" if o.note else f"{_scalar(o.name)}:"
+        f"{_scalar(o.name)}: {_scalar(o.note, quote=True)}" if o.note else f"{_scalar(o.name)}:"
         for o in options
     ]
     path.parent.mkdir(parents=True, exist_ok=True)

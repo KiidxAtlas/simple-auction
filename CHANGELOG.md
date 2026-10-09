@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4 — 2026-10-09
+
+### Fixed
+
+- The old, unmodified four-condition starter list now upgrades to the nine-step
+  grading scale when migrating settings or loading an existing conditions YAML.
+  Custom condition names, notes and ordering are preserved.
+- Condition descriptions starting with `%` load as literal text; generated
+  descriptions are quoted safely. Editing a YAML file by deleting and replacing
+  it no longer leaves the dropdown stuck on its previous condition choices.
+
 ## 0.1.3 — 2026-10-09
 
 ### Changed

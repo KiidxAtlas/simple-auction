@@ -157,10 +157,10 @@ class Config:
     def load_conditions(self, legacy: object = None) -> str | None:
         """Read data/conditions.yaml into `conditions`.
 
-        If the file doesn't exist yet it's created, from `legacy` (conditions
-        an older version kept in config.json) or the current list. If it
-        exists but can't be read, the current list is kept, the file is left
-        untouched, and the problem is returned as a message.
+        Missing files use the current list or migrated legacy settings. The
+        exact old four-condition starter list is upgraded to today's defaults,
+        including in existing YAML files; custom lists are preserved. Unreadable
+        files are left untouched and the problem is returned as a message.
         """
         path = self.conditions_path
         if path.exists():
@@ -169,9 +169,14 @@ class Config:
             except ConditionsFileError as e:
                 log.warning("%s", e)
                 return str(e)
+            if self.conditions == conditions.LEGACY_DEFAULT_CONDITIONS:
+                self.conditions = list(conditions.DEFAULT_CONDITIONS)
+                self.save_conditions()
             return None
         if legacy is not None:
             self.conditions = conditions.from_json(legacy)
+        if self.conditions == conditions.LEGACY_DEFAULT_CONDITIONS:
+            self.conditions = list(conditions.DEFAULT_CONDITIONS)
         self.save_conditions()
         return None
 

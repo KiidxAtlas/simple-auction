@@ -226,3 +226,27 @@ def test_settings_recovery_dialog_restores_backup(app, tmp_path, monkeypatch):
     assert recovered.base_dir == original.base_dir
     assert recovered.photos_dir == original.photos_dir
     assert next(tmp_path.glob("config.json.invalid-*")).read_bytes() == b"damaged"
+
+
+def test_condition_yaml_replacement_reloads_percentage_choices(window):
+    from PySide6.QtTest import QTest
+
+    page = window
+    path = page.config.conditions_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("Good: 80% original finish\n")
+    page._reload_conditions()
+    assert page.form.condition.findText("Good") >= 0
+
+    path.unlink()
+    QTest.qWait(600)
+    assert not path.exists()  # don't recreate an editor's temporarily absent file
+    assert page.form.condition.findText("Good") >= 0
+
+    path.write_text("Custom: % finish remaining\nFair: Some wear.\n")
+    QTest.qWait(800)
+    assert [option.name for option in page.config.conditions] == ["Custom", "Fair"]
+    assert page.config.conditions[0].note == "% finish remaining"
+    assert page.form.condition.findText("Custom") >= 0
+    assert page.form.condition.findText("Fair") >= 0
+    assert page.form.condition.findText("Good") == -1

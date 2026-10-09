@@ -133,6 +133,9 @@ class MainPage(QMainWindow):
             # Editors often save in several steps; read once they're done.
             lambda _path: QTimer.singleShot(300, self._reload_conditions)
         )
+        self._conditions_watcher.directoryChanged.connect(
+            lambda _path: QTimer.singleShot(300, self._reload_conditions)
+        )
         self._watch_conditions()
         if config.conditions_error:
             QTimer.singleShot(
@@ -637,14 +640,23 @@ class MainPage(QMainWindow):
 
     def _watch_conditions(self) -> None:
         watcher = self._conditions_watcher
-        if watcher.files():
-            watcher.removePaths(watcher.files())
-        if self.config.conditions_path.exists():
-            watcher.addPath(str(self.config.conditions_path))
+        paths = watcher.files() + watcher.directories()
+        if paths:
+            watcher.removePaths(paths)
+        path = self.config.conditions_path
+        if path.parent.exists():
+            watcher.addPath(str(path.parent))
+        if path.exists():
+            watcher.addPath(str(path))
 
     def _reload_conditions(self) -> None:
         if self._io_busy:
             QTimer.singleShot(300, self._reload_conditions)
+            return
+        if not self.config.conditions_path.exists():
+            # Editors can remove the file before replacing it. Keep the last
+            # good list and the directory watch instead of recreating the file.
+            self._watch_conditions()
             return
         before = list(self.config.conditions)
         error = self.config.load_conditions()
