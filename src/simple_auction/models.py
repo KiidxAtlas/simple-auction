@@ -1,20 +1,14 @@
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
-
-
-class Condition(StrEnum):
-    LIKE_NEW = "Like New"
-    EXCELLENT = "Excellent"
-    GOOD = "Good"
-    FAIR = "Fair"
 
 
 @dataclass
 class Lot:
     lot_number: int
     serial: str = ""
-    condition: Condition = Condition.LIKE_NEW
+    # One of the condition names from Settings (plain text, so it survives
+    # the condition being renamed or removed there).
+    condition: str = ""
     title: str = ""
     desc: str = ""
     owner: str = ""

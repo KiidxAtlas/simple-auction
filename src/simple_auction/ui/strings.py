@@ -132,6 +132,12 @@ API_KEY = "Gemini API key:"
 API_KEY_PLACEHOLDER = "Paste your key from aistudio.google.com/apikey"
 API_KEY_SAVED = "Saved securely. Paste a new key to replace it."
 FORGET_KEY = "Remove key"
+CONDITIONS = "Conditions:"
+CONDITION_NAME = "Name"
+CONDITION_NOTE = "Text added to the description"
+CONDITIONS_HINT = "The first condition is the default for new lots."
+MOVE_UP = "↑"
+MOVE_DOWN = "↓"
 LINKS_HINT = "Use {serial}, {make} and {title} in the link."
 EDIT_SERIAL_TABLE = "Edit serial table..."
 
@@ -156,6 +162,20 @@ def count(n: int, word: str) -> str:
 MENU_HELP = "Help"
 MENU_CHECK_UPDATES = "Check for Updates…"
 UPDATES_TITLE = "Check for Updates"
+UPDATES_CLOSE = "Close"
+SOURCE_UPDATES_CURRENT = "Running version {version} from source."
+SOURCE_UP_TO_DATE = "You have every change from GitHub."
+SOURCE_AVAILABLE = "{changes} on GitHub"
+SOURCE_AVAILABLE_BODY = "Update to get them; the app will restart."
+SOURCE_LOCAL_CHANGES = (
+    "You have unsaved code edits in this folder. They'll be kept; if one "
+    "clashes with an update, the update stops and nothing is changed."
+)
+SOURCE_UPDATE_BUTTON = "Update && Restart"
+SOURCE_UPDATING = "Updating…"
+SOURCE_FAILED_TITLE = "Couldn't update"
+SOURCE_FAILED = "Nothing was changed.\n\n{error}"
+SOURCE_UPDATES_WAITING = "{changes} available: Help → Check for Updates"
 UPDATES_CURRENT = "You're running version {version}."
 UPDATES_CHECKING = "Checking for updates…"
 UPDATES_FAILED_TITLE = "Couldn't check for updates"
@@ -185,4 +205,37 @@ UPDATES_DOWNLOAD_FAILED = (
 UPDATES_READY_TITLE = "Update ready"
 UPDATES_READY = (
     "The verified update was downloaded to:\n{path}\n\nOpen it to finish installing."
+)
+
+# Import
+IMPORT_BTN = "⤓   Import Excel…"
+IMPORT_PICK = "Choose old auction spreadsheets"
+IMPORT_TITLE = "Import Auction"
+IMPORT_HEADING = "Import {name}"
+IMPORT_ROWS = "{n} rows found."
+IMPORT_AUCTION = "Auction number:"
+IMPORT_MERGE_NOTE = (
+    "Auction {n} already exists: only lots it doesn't have yet will be added."
+)
+IMPORT_RENUMBER = "Renumber lots starting at the auction number"
+IMPORT_COLUMNS = "Columns"
+IMPORT_PREVIEW = "Preview"
+IMPORT_SKIP = "— not imported —"
+IMPORT_UNNAMED = "Column {n}"
+IMPORT_LOT = "Lot #"
+IMPORT_BUTTON = "Import"
+IMPORT_SUMMARY = "{lots} will be imported into auction {n}."
+IMPORT_ALREADY = "{lots} already in that auction will be left as they are."
+IMPORT_SKIPPED = "{rows} skipped (duplicate lot number or outside the auction)."
+IMPORT_READ_FAILED_TITLE = "Couldn't read file"
+IMPORT_READ_FAILED = "{name} couldn't be read as a spreadsheet: {error}"
+IMPORT_EMPTY = "{name} has no rows to import."
+IMPORTED = "Imported {lots} into auction {n}"
+IMPORTED_NONE = "Nothing imported: auction {n} already has those lots."
+
+# Errors
+ERROR_TITLE = "Something went wrong"
+ERROR_BODY = (
+    "That didn't work because of an unexpected error:\n\n{error}\n\n"
+    "Details were saved to {log}"
 )

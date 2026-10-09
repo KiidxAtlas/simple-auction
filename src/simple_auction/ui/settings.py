@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from simple_auction.services import api_key, lookup, numbering
+from simple_auction.services.conditions import ConditionOption, cleaned
 from simple_auction.services.config import Config
 from simple_auction.services.serial_links import SerialLink, is_valid
 from simple_auction.ui import strings
@@ -70,6 +71,39 @@ class SettingsDialog(QDialog):
         links_row.addWidget(add_link)
         links_row.addWidget(remove_link)
 
+        # Conditions: name + the sentence added to the description. Row order
+        # is the dropdown order; the first is the default for new lots.
+        self.conditions_table = QTableWidget(0, 2)
+        self.conditions_table.setObjectName("linksTable")
+        self.conditions_table.setHorizontalHeaderLabels(
+            [strings.CONDITION_NAME, strings.CONDITION_NOTE]
+        )
+        self.conditions_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.conditions_table.horizontalHeader().setStretchLastSection(True)
+        self.conditions_table.verticalHeader().hide()
+        self.conditions_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.conditions_table.setFixedHeight(160)
+        for option in config.conditions:
+            self._add_condition_row(option.name, option.note)
+        add_condition = QPushButton(strings.ADD_LINK)
+        add_condition.clicked.connect(self._new_condition)
+        remove_condition = QPushButton(strings.REMOVE_LINK)
+        remove_condition.clicked.connect(self._remove_conditions)
+        up = QPushButton(strings.MOVE_UP)
+        up.clicked.connect(lambda: self._move_condition(-1))
+        down = QPushButton(strings.MOVE_DOWN)
+        down.clicked.connect(lambda: self._move_condition(1))
+        conditions_hint = QLabel(strings.CONDITIONS_HINT)
+        conditions_hint.setObjectName("hint")
+        conditions_row = QHBoxLayout()
+        conditions_row.addWidget(conditions_hint, 1)
+        for button in (up, down, add_condition, remove_condition):
+            conditions_row.addWidget(button)
+
         # Gemini API key: typed here, saved to the Keychain, never shown again.
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -104,6 +138,10 @@ class SettingsDialog(QDialog):
         layout.addWidget(QLabel(strings.SERIAL_LINKS))
         layout.addWidget(self.links)
         layout.addLayout(links_row)
+        layout.addSpacing(10)
+        layout.addWidget(QLabel(strings.CONDITIONS))
+        layout.addWidget(self.conditions_table)
+        layout.addLayout(conditions_row)
         layout.addSpacing(10)
         layout.addWidget(QLabel(strings.API_KEY))
         layout.addLayout(key_row)
@@ -165,6 +203,49 @@ class SettingsDialog(QDialog):
             {i.row() for i in self.links.selectedIndexes()}, reverse=True
         ):
             self.links.removeRow(row)
+
+    def conditions(self) -> list[ConditionOption]:
+        """The condition rows, in order (blank and repeated names dropped)."""
+        table = self.conditions_table
+        rows = []
+        for r in range(table.rowCount()):
+            name, note = (table.item(r, c) for c in (0, 1))
+            rows.append(
+                ConditionOption(
+                    name.text() if name else "", note.text() if note else ""
+                )
+            )
+        return cleaned(rows)
+
+    def _add_condition_row(self, name: str, note: str) -> int:
+        table = self.conditions_table
+        row = table.rowCount()
+        table.insertRow(row)
+        table.setItem(row, 0, QTableWidgetItem(name))
+        table.setItem(row, 1, QTableWidgetItem(note))
+        return row
+
+    def _new_condition(self) -> None:
+        row = self._add_condition_row("", "")
+        self.conditions_table.setCurrentCell(row, 0)
+        self.conditions_table.editItem(self.conditions_table.item(row, 0))
+
+    def _remove_conditions(self) -> None:
+        table = self.conditions_table
+        for row in sorted({i.row() for i in table.selectedIndexes()}, reverse=True):
+            table.removeRow(row)
+
+    def _move_condition(self, step: int) -> None:
+        table = self.conditions_table
+        row = table.currentRow()
+        target = row + step
+        if row < 0 or not 0 <= target < table.rowCount():
+            return
+        for col in (0, 1):
+            a, b = table.takeItem(row, col), table.takeItem(target, col)
+            table.setItem(row, col, b)
+            table.setItem(target, col, a)
+        table.setCurrentCell(target, table.currentColumn())
 
     def _folder_row(self, field: QLineEdit, title: str) -> QHBoxLayout:
         browse = QPushButton(strings.BROWSE)

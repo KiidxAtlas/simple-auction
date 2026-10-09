@@ -1,49 +1,66 @@
 """Auto-generated listing text: make/model at the start, condition at the end."""
 
 import re
+from collections.abc import Iterable
 from dataclasses import replace
 
 from simple_auction.constants import TITLE_MAX_LENGTH
-from simple_auction.models import Condition, Lot
-
-# The sentence added to the description for each condition. Edit freely.
-CONDITION_NOTES: dict[Condition, str] = {
-    Condition.LIKE_NEW: "Appears unfired or barely used, no notable wear.",
-    Condition.EXCELLENT: "Light handling marks, bore bright.",
-    Condition.GOOD: "Normal wear and handling marks consistent with use.",
-    Condition.FAIR: "Noticeable wear, finish loss or marks. See photos.",
-}
-
-_ANY = "|".join(re.escape(c.value) for c in Condition)
-_TITLE_SUFFIX = re.compile(rf"\s+-\s+(?:{_ANY})\s*$")
-_DESC_LINE = re.compile(rf"^Condition:\s*(?:{_ANY})\..*$", re.MULTILINE)
+from simple_auction.models import Lot
+from simple_auction.services.conditions import ConditionOption
 
 
-def _title_parts(title: str, condition: Condition) -> tuple[str, str]:
-    return _TITLE_SUFFIX.sub("", title).strip(), f" - {condition.value}"
+def _any_of(names: Iterable[str]) -> str | None:
+    """Regex alternation for condition names (longest first), or None."""
+    unique = sorted({n for n in names if n}, key=len, reverse=True)
+    return "|".join(re.escape(n) for n in unique) or None
 
 
-def condition_title(title: str, condition: Condition) -> str:
+def _strip_suffix(title: str, known: Iterable[str]) -> str:
+    alts = _any_of(known)
+    if alts:
+        title = re.sub(rf"\s+-\s+(?:{alts})\s*$", "", title, flags=re.IGNORECASE)
+    return title.strip()
+
+
+def condition_title(title: str, condition: str, known: Iterable[str] = ()) -> str:
     """Append the condition (Colt 1911 -> Colt 1911 - Excellent), replacing any
-    old one. The result is at most TITLE_MAX_LENGTH; the title text is trimmed
-    to make room for the suffix if needed."""
-    base, suffix = _title_parts(title, condition)
+    earlier one from `known`. The result is at most TITLE_MAX_LENGTH; the
+    title text is trimmed to make room for the suffix if needed."""
+    base = _strip_suffix(title, [*known, condition])
     if not base:
         return ""
+    suffix = f" - {condition}" if condition else ""
     return base[: TITLE_MAX_LENGTH - len(suffix)].rstrip() + suffix
 
 
-def untrimmed_title_length(title: str, condition: Condition) -> int:
+def untrimmed_title_length(
+    title: str, condition: str, known: Iterable[str] = ()
+) -> int:
     """How long the title would be with its suffix, before any trimming."""
-    base, suffix = _title_parts(title, condition)
-    return len(base) + len(suffix) if base else 0
+    base = _strip_suffix(title, [*known, condition])
+    if not base:
+        return 0
+    return len(base) + (len(f" - {condition}") if condition else 0)
 
 
-def condition_desc(desc: str, condition: Condition) -> str:
-    """Add the condition sentence as the last paragraph, replacing any old one."""
-    base = re.sub(r"\n{3,}", "\n\n", _DESC_LINE.sub("", desc)).strip()
-    line = f"Condition: {condition.value}. {CONDITION_NOTES[condition]}"
+def condition_desc(
+    desc: str, condition: str, note: str, known: Iterable[str] = ()
+) -> str:
+    """Make the last paragraph "Condition: <name>. <note>", replacing the
+    line for any earlier condition from `known`."""
+    alts = _any_of([*known, condition])
+    if alts:
+        line_re = rf"^Condition:\s*(?:{alts})\..*$"
+        desc = re.sub(line_re, "", desc, flags=re.MULTILINE | re.IGNORECASE)
+    base = re.sub(r"\n{3,}", "\n\n", desc).strip()
+    if not condition:
+        return base
+    line = f"Condition: {condition}. {note}".strip()
     return f"{base}\n\n{line}" if base else line
+
+
+def find_option(options: list[ConditionOption], name: str) -> ConditionOption | None:
+    return next((o for o in options if o.name.lower() == name.lower()), None)
 
 
 _MAKE_MODEL_LINE = re.compile(r"^(?:Make|Model):.*(?:\n|$)", re.MULTILINE)
@@ -78,9 +95,17 @@ def make_model_desc(desc: str, make: str, model: str) -> str:
     return "\n\n".join(part for part in (head, rest) if part)
 
 
-def apply_condition(lot: Lot) -> Lot:
+def apply_condition(lot: Lot, options: list[ConditionOption]) -> Lot:
+    """Condition suffix on the title and sentence in the description.
+
+    A condition that's no longer in the list (renamed or removed in Settings)
+    keeps its title suffix, and its description text is left alone.
+    """
+    known = [o.name for o in options]
+    option = find_option(options, lot.condition)
+    desc = lot.desc
+    if option is not None:
+        desc = condition_desc(lot.desc, option.name, option.note, known)
     return replace(
-        lot,
-        title=condition_title(lot.title, lot.condition),
-        desc=condition_desc(lot.desc, lot.condition),
+        lot, title=condition_title(lot.title, lot.condition, known), desc=desc
     )

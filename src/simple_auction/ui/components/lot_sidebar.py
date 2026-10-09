@@ -44,6 +44,7 @@ class LotSidebar(QFrame):
     export_auction = Signal(int)  # auction_no
     delete_requested = Signal(list)  # list[Selection]
     settings_requested = Signal()
+    import_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -86,6 +87,10 @@ class LotSidebar(QFrame):
             shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
             shortcut.activated.connect(self._delete_selected)
 
+        import_btn = QPushButton(strings.IMPORT_BTN)
+        import_btn.setObjectName("ghost")
+        import_btn.clicked.connect(self.import_requested)
+
         settings = QPushButton(strings.SETTINGS_BTN)
         settings.setObjectName("ghost")
         settings.clicked.connect(self.settings_requested)
@@ -101,6 +106,7 @@ class LotSidebar(QFrame):
         layout.addSpacing(6)
         layout.addWidget(self.tree, 1)
         layout.addSpacing(8)
+        layout.addWidget(import_btn)
         layout.addWidget(settings)
 
     # -- public -------------------------------------------------------------

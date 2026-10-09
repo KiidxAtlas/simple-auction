@@ -28,10 +28,12 @@ from PySide6.QtWidgets import (
 )
 
 from simple_auction.constants import TITLE_MAX_LENGTH
-from simple_auction.models import Condition, Lot
+from simple_auction.models import Lot
+from simple_auction.services.conditions import DEFAULT_CONDITIONS, ConditionOption
 from simple_auction.services.listing import (
     condition_desc,
     condition_title,
+    find_option,
     make_model_desc,
     make_model_prefix,
     make_model_title,
@@ -92,6 +94,10 @@ class LotForm(QWidget):
         # The make/model last written into the title and description, so a
         # later edit replaces it instead of adding another copy.
         self._applied_make_model = ("", "")
+        # Condition choices from Settings, and the condition whose text is
+        # currently in the title/description (so changing it replaces that).
+        self._conditions: list[ConditionOption] = list(DEFAULT_CONDITIONS)
+        self._applied_condition = ""
 
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_empty())
@@ -176,7 +182,6 @@ class LotForm(QWidget):
         self.year.setMaxLength(4)
         self.serial.editingFinished.connect(self._on_serial_done)
         self.condition = QComboBox()
-        self.condition.addItems([c.value for c in Condition])
         self.condition.activated.connect(self._apply_condition)
         self.make = QLineEdit()
         self.make.setPlaceholderText(strings.MAKE_PLACEHOLDER)
@@ -313,7 +318,8 @@ class LotForm(QWidget):
         self.heading.setText(strings.LOT_HEADING.format(n=lot.lot_number))
         self.subtitle.setText(strings.LOT_SUBTITLE.format(n=auction_no))
         self.serial.setText(lot.serial)
-        self.condition.setCurrentText(lot.condition.value)
+        self._fill_conditions(lot.condition)
+        self._applied_condition = lot.condition
         self.title.setText(lot.title)
         self.desc.setPlainText(lot.desc)
         self.owner.setText(lot.owner)
@@ -386,6 +392,14 @@ class LotForm(QWidget):
         self.lookup_hint.setText(text)
         self._update_lookup_row()
 
+    def set_conditions(self, options: list[ConditionOption]) -> None:
+        """The condition choices (from Settings). An open lot keeps its
+        condition and picks up any new wording for it."""
+        self._conditions = list(options)
+        self._fill_conditions(self._condition() if self._lot else "")
+        if self._lot is not None:
+            self._apply_condition()
+
     def set_serial_links(self, links: list[SerialLink]) -> None:
         """The links shown under Serial # (from Settings)."""
         while self._links_layout.count():
@@ -408,7 +422,7 @@ class LotForm(QWidget):
         return Lot(
             lot_number=self._lot.lot_number,
             serial=self.serial.text().strip(),
-            condition=Condition(self.condition.currentText()),
+            condition=self._condition(),
             title=self.title.text().strip(),
             desc=self.desc.toPlainText().strip(),
             owner=self.owner.text().strip(),
@@ -421,8 +435,26 @@ class LotForm(QWidget):
 
     # -- internals ----------------------------------------------------------
 
-    def _condition(self) -> Condition:
-        return Condition(self.condition.currentText())
+    def _condition(self) -> str:
+        return self.condition.currentText().strip()
+
+    def _known_conditions(self) -> list[str]:
+        """Names whose suffix/sentence may be in the text and can be replaced."""
+        return [o.name for o in self._conditions] + [self._applied_condition]
+
+    def _fill_conditions(self, current: str) -> None:
+        """Put the configured conditions in the dropdown and select `current`.
+        A condition no longer in Settings is kept as an extra choice."""
+        names = [o.name for o in self._conditions]
+        self.condition.blockSignals(True)
+        self.condition.clear()
+        self.condition.addItems(names)
+        match = next((n for n in names if n.lower() == current.lower()), None)
+        if current and match is None:
+            self.condition.addItem(current)
+            match = current
+        self.condition.setCurrentIndex(self.condition.findText(match) if match else -1)
+        self.condition.blockSignals(False)
 
     def _mark_dirty(self) -> None:
         if self._loading or self._lot is None:
@@ -433,7 +465,9 @@ class LotForm(QWidget):
 
     def _update_title_count(self) -> None:
         """e.g. "87/100", red when the condition suffix would trim the title."""
-        n = untrimmed_title_length(self.title.text(), self._condition())
+        n = untrimmed_title_length(
+            self.title.text(), self._condition(), self._known_conditions()
+        )
         self.title_count.setText(f"{min(n, TITLE_MAX_LENGTH)}/{TITLE_MAX_LENGTH}")
         over = n > TITLE_MAX_LENGTH
         self.title_count.setToolTip(strings.TITLE_TRIMMED if over else "")
@@ -449,12 +483,19 @@ class LotForm(QWidget):
         so the text shows up immediately rather than on save.
         """
         condition = self._condition()
-        title = condition_title(self.title.text(), condition)
+        known = self._known_conditions()
+        title = condition_title(self.title.text(), condition, known)
         if title != self.title.text():
             self.title.setText(title)
-        desc = condition_desc(self.desc.toPlainText(), condition)
-        if desc != self.desc.toPlainText():
-            self.desc.setPlainText(desc)
+        option = find_option(self._conditions, condition)
+        # A condition that's been removed from Settings has no sentence to
+        # write, so the description is left as it is.
+        if option is not None or not condition:
+            note = option.note if option else ""
+            desc = condition_desc(self.desc.toPlainText(), condition, note, known)
+            if desc != self.desc.toPlainText():
+                self.desc.setPlainText(desc)
+        self._applied_condition = condition
 
     def _apply_make_model(self) -> None:
         """Put make and model at the start of the title and the top of the

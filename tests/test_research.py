@@ -5,7 +5,7 @@ import pytest
 from google.genai._gaos.lib import compat_errors
 
 from simple_auction.constants import RESEARCH_MODEL
-from simple_auction.models import Condition, Lot
+from simple_auction.models import Lot
 from simple_auction.services import research
 from simple_auction.services.research import (
     MissingApiKeyError,
@@ -87,9 +87,7 @@ def test_describe_lot_leaves_out_owner_and_book():
 
 
 def test_condition_included():
-    assert "Condition: Fair" in describe_lot(
-        Lot(1, title="Colt", condition=Condition.FAIR)
-    )
+    assert "Condition: Fair" in describe_lot(Lot(1, title="Colt", condition="Fair"))
 
 
 def test_request_uses_model_search_and_system_prompt():

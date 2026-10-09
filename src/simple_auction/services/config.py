@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from simple_auction.constants import AUCTION_STEP, PHOTO_FOLDER_NAME
-from simple_auction.services import serial_links
+from simple_auction.services import conditions, serial_links
+from simple_auction.services.conditions import ConditionOption
 from simple_auction.services.serial_links import SerialLink
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,10 @@ class Config:
     # Links shown under the Serial # field.
     serial_links: list[SerialLink] = field(
         default_factory=lambda: list(serial_links.DEFAULT_LINKS)
+    )
+    # Condition choices, in order; the first is the default for new lots.
+    conditions: list[ConditionOption] = field(
+        default_factory=lambda: list(conditions.DEFAULT_CONDITIONS)
     )
 
     @property
@@ -67,6 +72,7 @@ class Config:
             step=int(data.get("step", AUCTION_STEP)),
             start_at=data.get("start_at"),
             serial_links=serial_links.from_json(data.get("serial_links")),
+            conditions=conditions.from_json(data.get("conditions")),
         )
 
     def save(self, path: Path = CONFIG_PATH) -> None:
@@ -77,6 +83,7 @@ class Config:
             "step": self.step,
             "start_at": self.start_at,
             "serial_links": serial_links.to_json(self.serial_links),
+            "conditions": conditions.to_json(self.conditions),
         }
         path.write_text(json.dumps(data, indent=2))
 

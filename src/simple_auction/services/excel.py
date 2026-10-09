@@ -2,7 +2,7 @@ from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 
-from simple_auction.models import Condition, Lot
+from simple_auction.models import Lot
 
 HEADERS = ["Lot", "Serial", "Condition", "Title", "Desc", "Owner", "Book #", "Year"]
 
@@ -61,6 +61,24 @@ def save_lot(path: Path, lot: Lot) -> None:
         raise ExcelLockedError(path) from e
 
 
+def add_lots(path: Path, lots: list[Lot]) -> list[Lot]:
+    """Append lots the workbook doesn't have yet (by lot number), in one save.
+    Existing lots are left untouched. Returns the lots that were added."""
+    if not path.exists():
+        create_auction(path)
+    wb = load_workbook(path)
+    ws = wb.active
+    existing = {c[0].value for c in ws.iter_rows(min_row=2) if c[0].value is not None}
+    added = [lot for lot in lots if lot.lot_number not in existing]
+    for lot in sorted(added, key=lambda x: x.lot_number):
+        ws.append(_lot_to_row(lot))
+    try:
+        wb.save(path)
+    except PermissionError as e:
+        raise ExcelLockedError(path) from e
+    return added
+
+
 def delete_lots(path: Path, lot_numbers: set[int]) -> None:
     wb = load_workbook(path)
     ws = wb.active
@@ -77,7 +95,7 @@ def _lot_to_row(lot: Lot) -> list:
     return [
         lot.lot_number,
         lot.serial,
-        lot.condition.value,
+        lot.condition,
         lot.title,
         lot.desc,
         lot.owner,
@@ -89,14 +107,10 @@ def _lot_to_row(lot: Lot) -> list:
 def _row_to_lot(row: tuple) -> Lot:
     cells = list(row) + [None] * (len(HEADERS) - len(row))
     lot_no, serial, condition, title, desc, owner, book_no, year = cells[: len(HEADERS)]
-    try:
-        cond = Condition(condition)
-    except ValueError:
-        cond = Condition.LIKE_NEW
     return Lot(
         lot_number=int(lot_no),
         serial=serial or "",
-        condition=cond,
+        condition=str(condition).strip() if condition is not None else "",
         title=title or "",
         desc=desc or "",
         owner=owner or "",

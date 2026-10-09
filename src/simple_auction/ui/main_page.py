@@ -1,9 +1,11 @@
+import csv
 import logging
 import shutil
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 
-from PySide6.QtCore import QFile, QSettings, Qt, QTimer
+from PySide6.QtCore import QFile, QSettings, Qt, QThread, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,11 +20,13 @@ from simple_auction.models import Lot
 from simple_auction.services import (
     api_key,
     excel,
+    importer,
     listing,
     lookup,
     lot_details,
     numbering,
     research,
+    source_update,
 )
 from simple_auction.services.config import Config
 from simple_auction.services.excel import ExcelLockedError
@@ -32,7 +36,9 @@ from simple_auction.ui import strings, theme
 from simple_auction.ui.components.lot_form import LotForm
 from simple_auction.ui.components.lot_sidebar import LotSidebar, Selection
 from simple_auction.ui.components.research_panel import ResearchPanel
+from simple_auction.ui.import_dialog import ImportDialog
 from simple_auction.ui.settings import SettingsDialog
+from simple_auction.ui.source_update_dialog import SourceCheckThread, SourceUpdateDialog
 from simple_auction.ui.update_dialog import (
     UpdateCheckThread,
     UpdateDialog,
@@ -58,6 +64,7 @@ class MainPage(QMainWindow):
         self.sidebar = LotSidebar()
         self.form = LotForm()
         self.form.set_serial_links(config.serial_links)
+        self.form.set_conditions(config.conditions)
         self.research = ResearchPanel(self.form.current_lot)
         self.research.hide()
 
@@ -88,6 +95,7 @@ class MainPage(QMainWindow):
         self.sidebar.export_auction.connect(self.export_auction)
         self.sidebar.delete_requested.connect(self.delete_items)
         self.sidebar.settings_requested.connect(self.open_settings)
+        self.sidebar.import_requested.connect(self.import_auctions)
         self.form.changed.connect(lambda: self._autosave.start(AUTOSAVE_MS))
         self.form.save_now.connect(self.flush)
         self.form.export_requested.connect(self.export_current)
@@ -96,10 +104,11 @@ class MainPage(QMainWindow):
         self.form.research_toggled.connect(self.research.setVisible)
         self.research.closed.connect(self._close_research)
 
-        # Updates only apply to the installed (Windows) app; a copy running
-        # from source updates through git instead.
-        self._startup_update_thread: UpdateCheckThread | None = None
-        if is_frozen():
+        # The installed (Windows) app updates from release installers; a copy
+        # run from a git checkout (e.g. on a Mac) updates by pulling commits.
+        self._startup_update_thread: QThread | None = None
+        self._source_root = source_update.repo_root()
+        if is_frozen() or self._source_root is not None:
             help_menu = self.menuBar().addMenu(strings.MENU_HELP)
             help_menu.addAction(strings.MENU_CHECK_UPDATES, self.check_for_updates)
             QTimer.singleShot(STARTUP_UPDATE_DELAY_MS, self._startup_update_check)
@@ -177,7 +186,7 @@ class MainPage(QMainWindow):
         if self.auction_no is None or not self.form.is_dirty():
             return True
         auction_no = self.auction_no
-        lot = listing.apply_condition(self.form.collect())
+        lot = listing.apply_condition(self.form.collect(), self.config.conditions)
         path = self._path(auction_no)
         new_photos = any(p.parent != self._images_dir(auction_no) for p in lot.photos)
         if new_photos:  # compressing can take a moment
@@ -219,15 +228,43 @@ class MainPage(QMainWindow):
     # -- updates ------------------------------------------------------------
 
     def check_for_updates(self) -> None:
-        UpdateDialog(self).exec()
+        if self._source_root is not None:
+            dialog = SourceUpdateDialog(self._source_root, self)
+            dialog.restart_requested.connect(self._restart_after_update)
+            dialog.exec()
+        else:
+            UpdateDialog(self).exec()
+
+    def _restart_after_update(self) -> None:
+        """Close (saving the open lot) and start the updated code."""
+        if not self.close():
+            return
+        subprocess.Popen(
+            source_update.restart_command(),
+            cwd=self._source_root,
+            start_new_session=True,
+        )
+        QApplication.quit()
 
     def _startup_update_check(self) -> None:
-        """Check quietly; only speak up if a newer version exists."""
+        """Check quietly; only speak up if there's something new."""
         # Not parented to the window: deleting a running QThread is fatal.
-        thread = UpdateCheckThread()
-        thread.checkComplete.connect(self._on_startup_update_checked)
+        if self._source_root is not None:
+            thread = SourceCheckThread(self._source_root)
+            thread.checked.connect(self._on_startup_source_checked)
+        else:
+            thread = UpdateCheckThread()
+            thread.checkComplete.connect(self._on_startup_update_checked)
         self._startup_update_thread = thread
         thread.start()
+
+    def _on_startup_source_checked(self, status, _error: str) -> None:
+        if status is not None and status.behind:
+            self.statusBar().showMessage(
+                strings.SOURCE_UPDATES_WAITING.format(
+                    changes=strings.count(status.behind, "update")
+                )
+            )
 
     def _on_startup_update_checked(self, info) -> None:
         if info is not None and info.is_newer:
@@ -237,7 +274,9 @@ class MainPage(QMainWindow):
         self._ui_state.setValue("splitter", self.splitter.saveState())
         thread = self._startup_update_thread
         if thread is not None and thread.isRunning():
-            thread.checkComplete.disconnect()
+            for name in ("checkComplete", "checked"):
+                if (signal := getattr(thread, name, None)) is not None:
+                    signal.disconnect()
             keep_until_finished(thread)
         self._startup_update_thread = None
         if self.flush():
@@ -288,7 +327,8 @@ class MainPage(QMainWindow):
         except ValueError as e:
             QMessageBox.warning(self, strings.AUCTION_FULL_TITLE, str(e))
             return
-        lot = Lot(lot_number=lot_no)
+        first = self.config.conditions[0].name if self.config.conditions else ""
+        lot = Lot(lot_number=lot_no, condition=first)
         try:
             excel.save_lot(self._path(auction_no), lot)
         except ExcelLockedError:
@@ -403,6 +443,72 @@ class MainPage(QMainWindow):
             return
         self._status(strings.EXPORTED.format(path=dest))
 
+    def import_auctions(self) -> None:
+        """Import lots from old auction spreadsheets, one dialog per file."""
+        if not self._leave_lot():
+            return
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            strings.IMPORT_PICK,
+            str(Path.home()),
+            "Spreadsheets (*.xlsx *.xlsm *.csv)",
+        )
+        for name in files:
+            self._import_file(Path(name))
+
+    def _import_file(self, path: Path) -> None:
+        try:
+            sheet = importer.read_sheet(path)
+        except (importer.SheetReadError, OSError, UnicodeDecodeError, csv.Error) as e:
+            log.warning("Import of %s failed: %s", path, e)
+            QMessageBox.warning(
+                self,
+                strings.IMPORT_READ_FAILED_TITLE,
+                strings.IMPORT_READ_FAILED.format(name=path.name, error=e),
+            )
+            return
+        if not sheet.rows:
+            QMessageBox.information(
+                self, strings.IMPORT_TITLE, strings.IMPORT_EMPTY.format(name=path.name)
+            )
+            return
+
+        existing = excel.list_auctions(self.config.auctions_dir)
+        suggested = numbering.next_auction(
+            existing, self.config.step, self.config.start_at
+        )
+        dialog = ImportDialog(
+            path,
+            sheet,
+            existing,
+            lambda n: {lot.lot_number for lot in self._lots(n)},
+            suggested,
+            self.config.step,
+            [o.name for o in self.config.conditions],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        auction_no, lots = dialog.auction_no(), dialog.lots()
+        try:
+            added = excel.add_lots(self._path(auction_no), lots)
+        except ExcelLockedError:
+            self._locked_warning()
+            return
+        lot_details.save_many(self._details(auction_no), added)
+
+        self.refresh()
+        if added:
+            self.sidebar.select(auction_no, added[0].lot_number)
+            self.open_lot(auction_no, added[0].lot_number)
+            self._status(
+                strings.IMPORTED.format(
+                    lots=strings.count(len(added), "lot"), n=auction_no
+                )
+            )
+        else:
+            self._status(strings.IMPORTED_NONE.format(n=auction_no))
+
     def open_settings(self) -> None:
         if not self._leave_lot():
             return
@@ -419,8 +525,10 @@ class MainPage(QMainWindow):
             chosen = dialog.next_auction()
             self.config.start_at = None if chosen == from_files else chosen
             self.config.serial_links = dialog.serial_links()
+            self.config.conditions = dialog.conditions()
             self.config.save()
             self.form.set_serial_links(self.config.serial_links)
+            self.form.set_conditions(self.config.conditions)
             if key := dialog.new_api_key():
                 api_key.save(key)
                 research.forget_search_check()

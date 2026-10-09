@@ -42,7 +42,12 @@ source.
 
 ## Updates
 
-Installed copies check GitHub for a newer release at startup and from
-**Help → Check for Updates…**. Downloads are verified against the release's
-`.sha256` before installing; the installer runs silently and replaces the
-app.
+**Installed (Windows) app:** checks GitHub for a newer release at startup
+and from **Help → Check for Updates…**. Downloads are verified against the
+release's `.sha256` before installing; the installer runs silently and
+replaces the app.
+
+**Running from source (e.g. on a Mac):** **Help → Check for Updates…** lists
+the new commits on GitHub; **Update & Restart** runs a fast-forward-only
+`git pull` and `uv sync`, then restarts. Local edits are never overwritten.
+By hand: `git pull && uv sync`.

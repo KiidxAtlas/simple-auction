@@ -78,7 +78,7 @@ def describe_lot(lot: Lot) -> str:
         ("Title", lot.title),
         ("Serial number", lot.serial),
         ("Year of manufacture (as catalogued)", str(lot.year or "")),
-        ("Condition", lot.condition.value),
+        ("Condition", lot.condition),
         ("Description", lot.desc),
     ]
     return "\n".join(f"{name}: {value}" for name, value in fields if value)

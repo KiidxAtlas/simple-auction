@@ -48,6 +48,19 @@ def save(path: Path, lot: Lot) -> None:
         _write(path, data)
 
 
+def save_many(path: Path, lots: list[Lot]) -> None:
+    """Like save() for each lot, with one read and one write."""
+    data = _read(path)
+    for lot in lots:
+        entry = {name: getattr(lot, name) for name in _FIELDS if getattr(lot, name)}
+        if entry:
+            data[str(lot.lot_number)] = entry
+        else:
+            data.pop(str(lot.lot_number), None)
+    if data or path.exists():
+        _write(path, data)
+
+
 def delete(path: Path, lot_numbers: set[int]) -> None:
     data = _read(path)
     removed = [data.pop(str(n), None) for n in lot_numbers]

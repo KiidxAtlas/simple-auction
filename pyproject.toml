@@ -1,6 +1,6 @@
 [project]
 name = "simple-auction"
-version = "0.1.0"
+version = "0.1.1"
 description = "Desktop app for cataloguing auction lots into Excel, with photos, serial lookups and research."
 readme = "README.md"
 authors = [
