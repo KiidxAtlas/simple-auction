@@ -59,11 +59,11 @@ DEFAULT_CONDITIONS = [
     ),
     ConditionOption(
         "Excellent",
-        "New condition, used but little, no noticible marring of wood or metal, bluing perfect(except at muzzle or sharp edges.)",
+        "New condition, used but little, no noticeable marring of wood or metal, bluing perfect (except at muzzle or sharp edges).",
     ),
     ConditionOption(
         "Fine",
-        "All original parts; over 30% original finish' sharp lettering, numerals and design on metal and wood; minor marks in wood; good bore.",
+        "All original parts; over 30% original finish; sharp lettering, numerals and design on metal and wood; minor marks in wood; good bore.",
     ),
     ConditionOption(
         "Very Good",
@@ -71,15 +71,15 @@ DEFAULT_CONDITIONS = [
     ),
     ConditionOption(
         "Good",
-        "In safe working conditiion, minor wear on working surfaces, no broken parts, no corrosion or pitting that will interfere with proper functioning.",
+        "In safe working condition, minor wear on working surfaces, no broken parts, no corrosion or pitting that will interfere with proper functioning.",
     ),
     ConditionOption(
         "Fair",
-        "In safe working condition but well worn, perhaps requiring replacement of minor parts or adjustments which should be indicated in adcertisement, no rust, but may have corrosion pits which do not render article unsafe or inoperable",
+        "In safe working condition but well worn, perhaps requiring replacement of minor parts or adjustments which should be indicated in advertisement, no rust, but may have corrosion pits which do not render article unsafe or inoperable.",
     ),
     ConditionOption(
         "Poor",
-        "Major and minor parts replaced; major replacement parts required and extensive restoration needed; metal deeply pitted' pincipal lettering, numerals and design obliterated, wood badly scratched, bruised, cracked, or broken; mechanically inoperative; generally undesireable as a collector's firearm.",
+        "Major and minor parts replaced; major replacement parts required and extensive restoration needed; metal deeply pitted; principal lettering, numerals and design obliterated, wood badly scratched, bruised, cracked, or broken; mechanically inoperative; generally undesirable as a collector's firearm.",
     ),
 ]
 
