@@ -15,6 +15,7 @@ from pathlib import Path
 from simple_auction.constants import AUCTION_STEP, PHOTO_FOLDER_NAME
 from simple_auction.services import conditions, serial_links, storage
 from simple_auction.services.conditions import ConditionOption, ConditionsFileError
+from simple_auction.services.network import Sharing
 from simple_auction.services.serial_links import SerialLink
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class Config:
     conditions_error: str | None = field(default=None, compare=False)
     # None keeps the OS theme for settings created before the manual toggle.
     dark_mode: bool | None = None
+    sharing: Sharing = field(default_factory=Sharing)
 
     @property
     def auctions_dir(self) -> Path:
@@ -101,6 +103,8 @@ class Config:
             raise TypeError("dark_mode must be true, false or null")
         if step <= 0 or (start is not None and (type(start) is not int or start < 0)):
             raise ValueError("invalid auction numbering settings")
+        sharing = Sharing(**data.get("sharing", {}))
+        sharing.validate()
         config = cls(
             base_dir=Path(base),
             photos_dir=Path(photos),
@@ -108,6 +112,7 @@ class Config:
             start_at=start,
             serial_links=serial_links.from_json(data.get("serial_links")),
             dark_mode=dark_mode,
+            sharing=sharing,
         )
         return config, data
 
@@ -137,6 +142,7 @@ class Config:
             "start_at": self.start_at,
             "serial_links": serial_links.to_json(self.serial_links),
             "dark_mode": self.dark_mode,
+            "sharing": vars(self.sharing),
         }
         return json.dumps(data, indent=2).encode("utf-8")
 

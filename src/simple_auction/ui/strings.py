@@ -272,3 +272,7 @@ CONFIG_PICK_PHOTOS = "Choose your existing photos folder"
 ALREADY_RUNNING = "Another Simple Auction instance is running, or the settings folder cannot be locked. Close the other instance or check folder permissions before trying again."
 
 DARK_MODE = "Dark mode"
+SHIPPING_NAV = "Shipping"
+CATALOGUE_NAV = "Back to Catalogue"
+CATALOGUE_WORKSPACE = "Simple Auction · Catalogue"
+SHIPPING_WORKSPACE = "Simple Auction · Shipping"

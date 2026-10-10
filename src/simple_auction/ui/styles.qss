@@ -27,6 +27,207 @@ QSplitter::handle:hover {
     background: $accent_soft;
 }
 
+QWidget#workspaceHeader {
+    background: $surface;
+    border-bottom: 1px solid $border;
+}
+
+QDoubleSpinBox {
+    background: $field;
+    border: 1px solid $border;
+    border-radius: 6px;
+    padding: 7px 4px;
+    selection-background-color: $accent;
+}
+
+/* ---- Shipping ----------------------------------------------------- */
+
+QFrame#shippingEmpty {
+    background: $surface;
+    border: 2px dashed $border;
+    border-radius: 12px;
+}
+
+QFrame#shippingEmpty[state="dragging"] {
+    background: $accent_soft;
+    border-color: $accent;
+}
+
+QLabel#shippingEmptyTitle {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+QLabel#shippingStepNumber {
+    background: $accent_soft;
+    color: $accent;
+    border-radius: 13px;
+    font-weight: 700;
+}
+
+QLabel#shippingStepTitle {
+    font-weight: 600;
+}
+
+QLabel#shippingStep {
+    color: $muted;
+    padding: 5px 10px;
+    border-radius: 12px;
+}
+
+QLabel#shippingStep[state="active"] {
+    background: $accent_soft;
+    color: $accent;
+    font-weight: 600;
+}
+
+QLabel#shippingStep[state="done"] {
+    color: $text;
+}
+
+QLabel#shippingStepDivider {
+    color: $border;
+}
+
+QLabel#shippingPill {
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    background: $hover;
+    color: $muted;
+}
+
+QLabel#shippingPill[state="ready"],
+QLabel#shippingPill[state="done"] {
+    background: $accent_soft;
+    color: $accent;
+}
+
+QLabel#shippingPill[state="attention"] {
+    border: 1px solid $danger;
+    background: transparent;
+    color: $danger;
+}
+
+QProgressBar#shippingProgress {
+    background: $hover;
+    border: none;
+    border-radius: 3px;
+}
+
+QProgressBar#shippingProgress::chunk {
+    background: $accent;
+    border-radius: 3px;
+}
+
+QFrame#shippingActionBar {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: 10px;
+}
+
+QLabel#shippingCheck {
+    color: $muted;
+}
+
+QLabel#shippingCheck[state="error"] {
+    color: $danger;
+}
+
+QLabel#shippingCheck[state="ok"],
+QLabel#shippingCheck[state="done"] {
+    color: $accent;
+    font-weight: 600;
+}
+
+QLabel#shippingAddressText {
+    font-size: 14px;
+}
+
+QFrame#shippingQueue,
+QFrame#shippingCard,
+QFrame#shippingFooter {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: 10px;
+}
+
+QLabel#shippingBuyerTitle {
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QLabel#shippingCardTitle {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+QLabel#shippingFieldLabel {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QFrame#shippingWeightBox {
+    background: $field;
+    border: 1px solid $border;
+    border-radius: 8px;
+}
+
+QLineEdit#shippingWeight {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: 28px;
+    font-weight: 600;
+}
+
+QLabel#shippingWeightUnit {
+    font-size: 20px;
+    color: $muted;
+}
+
+QLineEdit#shippingNumber {
+    font-size: 16px;
+}
+
+QTableWidget#shippingBuyers {
+    background: transparent;
+    border: none;
+    outline: 0;
+}
+
+QTableWidget#shippingBuyers::item {
+    padding: 4px;
+    border-bottom: 1px solid $border;
+}
+
+QTableWidget#shippingBuyers::item:selected {
+    background: $accent_soft;
+    color: $text;
+}
+
+QListWidget#shippingLots {
+    background: transparent;
+    border: none;
+}
+
+QListWidget#shippingLots::item {
+    padding: 7px 0;
+}
+
+QFrame#shippingExport {
+    background: $accent_soft;
+    border: 1px solid $accent;
+    border-radius: 8px;
+}
+
+QWidget#content QPushButton#primary:disabled {
+    background: $surface;
+    color: $muted;
+    border-color: $border;
+}
+
 /* ---- Sidebar ------------------------------------------------------- */
 
 QFrame#sidebar {
@@ -331,4 +532,43 @@ QStatusBar {
     background: $bg;
     color: $muted;
     border-top: 1px solid $border;
+}
+
+/* ---- Settings ----------------------------------------------------- */
+
+QTabWidget#settingsTabs::pane {
+    border: none;
+}
+
+QTabWidget#settingsTabs QTabBar::tab {
+    background: $bg;
+    color: $muted;
+    padding: 10px 18px;
+    border-bottom: 2px solid transparent;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:selected {
+    color: $text;
+    border-bottom-color: $accent;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:hover {
+    background: $accent_soft;
+}
+
+QFrame#settingsSection {
+    background: $surface;
+    border: 1px solid $border;
+    border-radius: 10px;
+}
+
+QLabel#settingsSectionTitle {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+QDialog#settingsDialog QPushButton:disabled {
+    color: $muted;
+    background: $bg;
+    border-color: $border;
 }

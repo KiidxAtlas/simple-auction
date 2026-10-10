@@ -210,14 +210,54 @@ def test_settings_controls_remain_reachable_on_small_screens(app, tmp_path):
         dialog.show()
         app.processEvents()
         buttons = dialog.findChild(QDialogButtonBox)
-        scroll = dialog.findChild(QScrollArea)
-        assert buttons.isVisible()
-        assert dialog.rect().contains(buttons.geometry())
-        assert scroll.verticalScrollBar().maximum() > 0
-        assert dialog.dark_mode_toggle.isVisible()
-        scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+        assert dialog.tabs.count() == 2
+        assert dialog.tabs.currentIndex() == 0
+        assert [dialog.tabs.tabText(i) for i in range(2)] == [
+            "Auction setup",
+            "General",
+        ]
+        for index in range(dialog.tabs.count()):
+            dialog.tabs.setCurrentIndex(index)
+            app.processEvents()
+            scroll = dialog.tabs.currentWidget()
+            assert isinstance(scroll, QScrollArea)
+            assert buttons.isVisible()
+            assert dialog.rect().contains(buttons.geometry())
+            assert scroll.verticalScrollBar().maximum() > 0
+            if index == 1:
+                assert dialog.dark_mode_toggle.isVisible()
+                assert dialog.network.isVisible()
+                assert not dialog.next_number.isVisible()
+            else:
+                assert dialog.next_number.isVisible()
+                assert dialog.links.isVisible()
+                assert dialog.conditions_table.isVisible()
+                assert not dialog.dark_mode_toggle.isVisible()
+                assert not dialog.network.isVisible()
+            scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+            app.processEvents()
+            assert dialog.rect().contains(buttons.geometry())
+        # Switching tabs preserves pending edits until the shared Save action.
+        dialog.next_number.setText("52000")
+        dialog.tabs.setCurrentIndex(1)
+        dialog.dark_mode_toggle.setChecked(True)
+        dialog.tabs.setCurrentIndex(0)
+        assert dialog.next_auction() == 52000
+        assert dialog.dark_mode()
+        # Lists use extra window space instead of staying at a fixed height.
+        small_height = dialog.conditions_table.height()
+        dialog.resize(980, 1000)
         app.processEvents()
-        assert dialog.rect().contains(buttons.geometry())
+        assert dialog.conditions_table.height() > small_height
+        assert not dialog.move_up.isEnabled()
+        assert not dialog.move_down.isEnabled()
+        dialog.conditions_table.setCurrentCell(0, 0)
+        assert not dialog.move_up.isEnabled()
+        assert dialog.move_down.isEnabled()
+        first = dialog.conditions()[0]
+        dialog.move_down.click()
+        assert dialog.conditions()[1] == first
+        assert dialog.move_up.isEnabled()
     finally:
         dialog.close()
         dialog.deleteLater()

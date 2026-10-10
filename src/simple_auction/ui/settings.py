@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QIntValidator
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -15,8 +15,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -26,13 +28,17 @@ from simple_auction.services.conditions import ConditionOption, cleaned, save_fi
 from simple_auction.services.config import Config
 from simple_auction.services.serial_links import SerialLink, is_valid
 from simple_auction.ui import strings, theme
+from simple_auction.ui.network_settings import NetworkSettings
 
 
 class SettingsDialog(QDialog):
     def __init__(self, config: Config, existing: list[int], parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(strings.SETTINGS)
+        self.setObjectName("settingsDialog")
         self.setMinimumWidth(640)
+
+        self.network = NetworkSettings(config.sharing, self)
 
         self.folder = QLineEdit(str(config.base_dir))
         self.photos = QLineEdit(str(config.photos_dir))
@@ -61,25 +67,35 @@ class SettingsDialog(QDialog):
         self.links = QTableWidget(0, 2)
         self.links.setObjectName("linksTable")
         self.links.setHorizontalHeaderLabels([strings.LINK_NAME, strings.LINK_URL])
-        self.links.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
+        self.links.setColumnWidth(0, 210)
         self.links.horizontalHeader().setStretchLastSection(True)
         self.links.verticalHeader().hide()
         self.links.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.links.setFixedHeight(130)
+        self.links.setMinimumHeight(140)
+        self.links.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
+        )
+        self.links.verticalHeader().setDefaultSectionSize(38)
+        self.links.setWordWrap(False)
+        self.links.setAccessibleName("Serial number links")
         for link in config.serial_links:
             self._add_link_row(link.name, link.url)
-        add_link = QPushButton(strings.ADD_LINK)
+        add_link = QPushButton("Add link")
         add_link.clicked.connect(self._new_link)
-        remove_link = QPushButton(strings.REMOVE_LINK)
+        self.remove_link = QPushButton("Remove selected")
+        remove_link = self.remove_link
+        remove_link.setEnabled(False)
+        self.links.itemSelectionChanged.connect(
+            lambda: remove_link.setEnabled(bool(self.links.selectedIndexes()))
+        )
         remove_link.clicked.connect(self._remove_links)
-        links_hint = QLabel(strings.LINKS_HINT)
+        links_hint = QLabel("Double-click a cell to edit. " + strings.LINKS_HINT)
         links_hint.setObjectName("hint")
         links_row = QHBoxLayout()
-        links_row.addWidget(links_hint, 1)
+        links_hint.setWordWrap(True)
         links_row.addWidget(add_link)
         links_row.addWidget(remove_link)
+        links_row.addStretch(1)
 
         # Conditions: name + the sentence added to the description. Row order
         # is the dropdown order.
@@ -88,37 +104,60 @@ class SettingsDialog(QDialog):
         self.conditions_table.setHorizontalHeaderLabels(
             [strings.CONDITION_NAME, strings.CONDITION_NOTE]
         )
-        self.conditions_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
+        self.conditions_table.setColumnWidth(0, 210)
         self.conditions_table.horizontalHeader().setStretchLastSection(True)
         self.conditions_table.verticalHeader().hide()
         self.conditions_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
         )
-        self.conditions_table.setFixedHeight(160)
+        self.conditions_table.setMinimumHeight(320)
+        self.conditions_table.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
+        )
+        self.conditions_table.setAccessibleName("Auction conditions")
+        self.conditions_table.verticalHeader().setMinimumSectionSize(44)
+        self.conditions_table.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.conditions_table.setWordWrap(True)
         self._original_conditions = list(config.conditions)
         for option in config.conditions:
             self._add_condition_row(option.name, option.note)
         self._conditions_path = config.conditions_path
-        add_condition = QPushButton(strings.ADD_LINK)
+        add_condition = QPushButton("Add condition")
         add_condition.clicked.connect(self._new_condition)
-        remove_condition = QPushButton(strings.REMOVE_LINK)
+        self.remove_condition = QPushButton("Remove selected")
+        remove_condition = self.remove_condition
         remove_condition.clicked.connect(self._remove_conditions)
-        up = QPushButton(strings.MOVE_UP)
+        self.move_up = QPushButton("Move up")
+        up = self.move_up
         up.clicked.connect(lambda: self._move_condition(-1))
-        down = QPushButton(strings.MOVE_DOWN)
+        self.move_down = QPushButton("Move down")
+        down = self.move_down
         down.clicked.connect(lambda: self._move_condition(1))
-        conditions_hint = QLabel(strings.CONDITIONS_HINT)
+        self.conditions_table.itemSelectionChanged.connect(
+            self._update_condition_actions
+        )
+        self.conditions_table.currentCellChanged.connect(self._update_condition_actions)
+        self.conditions_table.model().rowsRemoved.connect(
+            self._update_condition_actions
+        )
+        self._update_condition_actions()
+        conditions_hint = QLabel(
+            "Double-click a cell to edit. " + strings.CONDITIONS_HINT
+        )
         conditions_hint.setObjectName("hint")
         open_file = QPushButton(strings.OPEN_CONDITIONS_FILE)
         open_file.setToolTip(strings.OPEN_CONDITIONS_FILE_TIP)
         open_file.clicked.connect(self._open_conditions_file)
         conditions_row = QHBoxLayout()
-        conditions_row.addWidget(conditions_hint, 1)
-        conditions_row.addWidget(open_file)
-        for button in (up, down, add_condition, remove_condition):
+        conditions_hint.setWordWrap(True)
+        for button in (add_condition, up, down, remove_condition):
             conditions_row.addWidget(button)
+        conditions_row.addStretch(1)
+        conditions_footer = QHBoxLayout()
+        conditions_footer.addWidget(conditions_hint, 1)
+        conditions_footer.addWidget(open_file)
 
         # Gemini API key: typed here, saved to the Keychain, never shown again.
         self.key = QLineEdit()
@@ -137,42 +176,94 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
-        content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setSpacing(6)
-        layout.addWidget(self.dark_mode_toggle)
-        layout.addSpacing(10)
-        layout.addWidget(QLabel(strings.AUCTIONS_FOLDER))
-        layout.addLayout(self._folder_row(self.folder, strings.PICK_FOLDER))
-        layout.addSpacing(10)
-        layout.addWidget(QLabel(strings.PHOTOS_FOLDER))
-        layout.addLayout(self._folder_row(self.photos, strings.PICK_PHOTOS_FOLDER))
-        layout.addSpacing(10)
-        layout.addWidget(QLabel(strings.NEXT_AUCTION))
-        layout.addLayout(next_row)
-        layout.addSpacing(10)
-        layout.addWidget(QLabel(strings.SERIAL_TABLE))
-        layout.addLayout(table_row)
-        layout.addSpacing(10)
-        layout.addWidget(QLabel(strings.SERIAL_LINKS))
-        layout.addWidget(self.links)
-        layout.addLayout(links_row)
-        layout.addSpacing(10)
-        layout.addWidget(QLabel(strings.CONDITIONS))
-        layout.addWidget(self.conditions_table)
-        layout.addLayout(conditions_row)
-        layout.addSpacing(10)
-        layout.addWidget(QLabel(strings.API_KEY))
-        layout.addLayout(key_row)
-        layout.addSpacing(14)
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("settingsTabs")
+        self.tabs.setDocumentMode(True)
+
+        general = QWidget()
+        general.setObjectName("scrollBody")
+        general_layout = QVBoxLayout(general)
+        general_layout.setSpacing(14)
+        appearance = self._section("Appearance")
+        appearance.layout().addWidget(self.dark_mode_toggle)
+        general_layout.addWidget(appearance)
+        general_layout.addWidget(self.network)
+        folders = self._section("Folders")
+        folders.layout().addWidget(QLabel(strings.AUCTIONS_FOLDER))
+        folders.layout().addLayout(self._folder_row(self.folder, strings.PICK_FOLDER))
+        folders.layout().addSpacing(6)
+        folders.layout().addWidget(QLabel(strings.PHOTOS_FOLDER))
+        folders.layout().addLayout(
+            self._folder_row(self.photos, strings.PICK_PHOTOS_FOLDER)
+        )
+        general_layout.addWidget(folders)
+        serial_table = self._section("Serial number lookup")
+        serial_table.layout().addLayout(table_row)
+        general_layout.addWidget(serial_table)
+        research = self._section("Research")
+        research.layout().addWidget(QLabel(strings.API_KEY))
+        research.layout().addLayout(key_row)
+        general_layout.addWidget(research)
+        general_layout.addStretch(1)
+
+        auction = QWidget()
+        auction.setObjectName("scrollBody")
+        auction_layout = QVBoxLayout(auction)
+        auction_layout.setSpacing(14)
+        numbering_section = self._section("Auction numbering")
+        next_row.insertWidget(0, QLabel(strings.NEXT_AUCTION))
+        numbering_section.layout().addLayout(next_row)
+        auction_layout.addWidget(numbering_section)
+        links = self._section(strings.SERIAL_LINKS.rstrip(":"))
+        links.layout().addLayout(links_row)
+        links.layout().addWidget(self.links, 1)
+        links.layout().addWidget(links_hint)
+        links.setMinimumHeight(links.layout().minimumSize().height())
+        auction_layout.addWidget(links, 1)
+        conditions = self._section(strings.CONDITIONS.rstrip(":"))
+        conditions.layout().addLayout(conditions_row)
+        conditions.layout().addWidget(self.conditions_table, 1)
+        conditions.layout().addLayout(conditions_footer)
+        conditions.setMinimumHeight(conditions.layout().minimumSize().height())
+        auction_layout.addWidget(conditions, 3)
+        self.tabs.addTab(self._scroll(auction), "Auction setup")
+        self.tabs.addTab(self._scroll(general), "General")
+
+        outer = QVBoxLayout(self)
+        outer.addWidget(self.tabs, 1)
+        outer.addWidget(buttons)
+        available = self.screen().availableGeometry()
+        self.resize(min(980, available.width() - 60), min(940, available.height() - 60))
+
+    @staticmethod
+    def _section(title: str) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("settingsSection")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+        heading = QLabel(title)
+        heading.setObjectName("settingsSectionTitle")
+        layout.addWidget(heading)
+        return frame
+
+    @staticmethod
+    def _scroll(content: QWidget) -> QScrollArea:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(content)
-        outer = QVBoxLayout(self)
-        outer.addWidget(scroll)
-        outer.addWidget(buttons)
-        self.resize(680, min(860, self.screen().availableGeometry().height() - 80))
+        return scroll
+
+    def accept(self):
+        if self.network.validate():
+            super().accept()
+        else:
+            self.tabs.setCurrentIndex(1)
+
+    def sharing(self):
+        return self.network.value()
 
     def dark_mode(self) -> bool:
         return self.dark_mode_toggle.isChecked()
@@ -276,11 +367,25 @@ class SettingsDialog(QDialog):
         for row in sorted({i.row() for i in table.selectedIndexes()}, reverse=True):
             table.removeRow(row)
 
+    def _update_condition_actions(self, *_args) -> None:
+        table = self.conditions_table
+        selected = {i.row() for i in table.selectedIndexes()}
+        row = table.currentRow()
+        single = len(selected) == 1 and row in selected
+        self.remove_condition.setEnabled(bool(selected))
+        self.move_up.setEnabled(single and row > 0)
+        self.move_down.setEnabled(single and row < table.rowCount() - 1)
+
     def _move_condition(self, step: int) -> None:
         table = self.conditions_table
         row = table.currentRow()
         target = row + step
-        if row < 0 or not 0 <= target < table.rowCount():
+        selected = {i.row() for i in table.selectedIndexes()}
+        if (
+            len(selected) != 1
+            or row not in selected
+            or not 0 <= target < table.rowCount()
+        ):
             return
         for col in (0, 1):
             a, b = table.takeItem(row, col), table.takeItem(target, col)

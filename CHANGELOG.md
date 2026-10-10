@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Six-digit pairing codes, with existing saved pairings preserved during updates.
+  Saved host/join modes resume when the app reopens. Clients retry while the host
+  is offline and rediscover the same host after a network-address change, remembering
+  the recovered address. Repeated incorrect pairing attempts are rate limited.
+
+- Settings opens on Auction setup, followed by General. The wider dialog gives
+  links and conditions expandable tables, wrapped descriptions, and clearer
+  selection and reorder controls. Save/Cancel stay visible on small screens.
+
+- Local network sharing in Settings: host on one computer, find it from another,
+  pair with a code, and share auctions, lot details, photos, and shipping progress.
+  The host imports existing data into a local SQLite database; photos remain
+  files and Excel/Pirate Ship exports remain available on either computer.
+- Shared saves check for conflicting edits, assign new numbers on the server,
+  merge changes to different buyers, and preserve unsaved drafts while disconnected.
+  Shipping exports have a shared transactional ledger and recoverable downloads.
+- Turning hosting off continues using the latest local database. Original import
+  sources remain intact, and hosted databases survive application restarts.
+
+- A header Shipping button switches the full workspace to a Proxibid-to-Pirate
+  Ship page. Drop in a Winning Bidders CSV, review automatically mapped buyer
+  addresses, correct mistakes or exclude local pickups, then weigh and measure
+  every box before exporting. Package measurements are required for export.
+- Package measurements use plain text inputs: weight in pounds, dimensions in
+  inches, with Tab navigation and Enter to mark ready. A buyer queue, central
+  package form, and separate address/items cards replace the long stacked form.
+  Mark ready & next moves through packing; search and status filters
+  help find buyers. After export, open the CSV folder and Pirate Ship directly
+  from the page.
+- New measured exports use Weight (Pounds); existing stored weights retain their
+  original values.
+- Shipping progress is saved per auction. Exports record shipment history to
+  exclude previously exported shipments. CSV and progress writes commit together.
+
+### Fixed
+
+- Completed loading dialogs no longer reappear over the shipping column
+  confirmation window and block importing buyers.
+
 ## 0.1.4 — 2026-10-09
 
 ### Fixed

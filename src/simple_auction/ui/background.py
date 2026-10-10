@@ -61,6 +61,11 @@ def run_io[T](parent: QWidget, label: str, operation: Callable[[], T]) -> T:
         return worker.result
     finally:
         show_timer.stop()
+        # QProgressDialog has its own delayed-show timer. hide() doesn't stop
+        # it, and deleteLater() can be deferred by a following dialog.exec().
+        # Reset before returning so completed work cannot reappear as a modal
+        # loading window over the next dialog.
+        progress.reset()
         progress.hide()
         progress.deleteLater()
         parent.setEnabled(enabled)
