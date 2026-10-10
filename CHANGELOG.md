@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 — 2026-10-09
 
 ### Added
 
@@ -8,11 +8,9 @@
   Saved host/join modes resume when the app reopens. Clients retry while the host
   is offline and rediscover the same host after a network-address change, remembering
   the recovered address. Repeated incorrect pairing attempts are rate limited.
-
 - Settings opens on Auction setup, followed by General. The wider dialog gives
   links and conditions expandable tables, wrapped descriptions, and clearer
   selection and reorder controls. Save/Cancel stay visible on small screens.
-
 - Local network sharing in Settings: host on one computer, find it from another,
   pair with a code, and share auctions, lot details, photos, and shipping progress.
   The host imports existing data into a local SQLite database; photos remain
@@ -22,7 +20,6 @@
   Shipping exports have a shared transactional ledger and recoverable downloads.
 - Turning hosting off continues using the latest local database. Original import
   sources remain intact, and hosted databases survive application restarts.
-
 - A header Shipping button switches the full workspace to a Proxibid-to-Pirate
   Ship page. Drop in a Winning Bidders CSV, review automatically mapped buyer
   addresses, correct mistakes or exclude local pickups, then weigh and measure
@@ -82,7 +79,6 @@
 - Save errors report the actual problem rather than always blaming Excel.
 - Stopping research interrupts pending HTTP requests and closes their resources,
   without advancing unfinished conversation history.
-
 - Check for Updates said "check your internet connection" on some Windows
   PCs that were online. The app now checks secure connections the same way
   Windows and browsers do (Python's stricter checks rejected certificates

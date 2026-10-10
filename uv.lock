@@ -1,5 +1,5 @@
 version = 1
-revision = 6
+revision = 5
 requires-python = ">=3.14"
 
 [[package]]
@@ -928,7 +928,7 @@ wheels = [
 
 [[package]]
 name = "simple-auction"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "." }
 dependencies = [
     { name = "google-genai" },
