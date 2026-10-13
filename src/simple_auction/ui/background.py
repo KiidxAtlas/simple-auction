@@ -4,7 +4,8 @@ import logging
 from collections.abc import Callable
 
 from PySide6.QtCore import QEventLoop, Qt, QThread, QTimer
-from PySide6.QtWidgets import QProgressDialog, QWidget
+from PySide6.QtWidgets import QApplication, QProgressDialog, QWidget
+from shiboken6 import isValid
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,9 @@ def run_io[T](parent: QWidget, label: str, operation: Callable[[], T]) -> T:
     progress.setCancelButton(None)
     progress.setWindowModality(Qt.WindowModality.ApplicationModal)
     # Block input immediately, even before the delayed progress window is shown.
+    # Disabling the parent strips focus from the field being typed in (autosave
+    # fires mid-edit), so remember it and hand focus back afterwards.
+    focused = QApplication.focusWidget()
     enabled = parent.isEnabled()
     parent.setEnabled(False)
     worker = _Worker(operation)
@@ -69,3 +73,12 @@ def run_io[T](parent: QWidget, label: str, operation: Callable[[], T]) -> T:
         progress.hide()
         progress.deleteLater()
         parent.setEnabled(enabled)
+        if (
+            focused is not None
+            and isValid(focused)
+            and focused.isVisible()
+            and focused.isEnabled()
+            and QApplication.focusWidget() is not focused
+        ):
+            focused.window().activateWindow()
+            focused.setFocus(Qt.FocusReason.OtherFocusReason)

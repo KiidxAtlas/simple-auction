@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6 — 2026-10-13
+
+### Fixed
+
+- Autosave no longer takes focus away from the field you're typing in.
+
 ## 0.1.5 — 2026-10-09
 
 ### Added
