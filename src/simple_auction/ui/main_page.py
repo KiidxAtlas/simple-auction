@@ -40,7 +40,6 @@ from simple_auction.services import (
     catalogue,
     excel,
     importer,
-    listing,
     lookup,
     lot_details,
     network,
@@ -434,9 +433,8 @@ class MainPage(QMainWindow):
         if self.auction_no is None or not self.form.is_dirty():
             return True
         auction_no = self.auction_no
-        lot = listing.apply_condition(
-            self.form.collect(), self.config.conditions, include_title=False
-        )
+        shown = self.form.collect()
+        lot = self.form.collect_for_save()
         path = self._path(auction_no)
         details, images = self._details(auction_no), self._images_dir(auction_no)
         try:
@@ -469,9 +467,15 @@ class MainPage(QMainWindow):
             return False
         self._save_error = None
         self.form.save_state.setToolTip("")
+        # Something may have changed the form while the save ran (e.g. a serial
+        # lookup result); those edits aren't on disk yet, so keep them dirty.
+        unchanged = self.form.collect() == shown
         if photos != lot.photos:
             self.form.set_photos(photos)
-        self.form.mark_saved()
+        if unchanged:
+            self.form.mark_saved()
+        else:
+            self._autosave.start(AUTOSAVE_MS)
         self.sidebar.update_lot(auction_no, lot)
         self._recycle(removed, images)
         return True

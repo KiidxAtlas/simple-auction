@@ -43,6 +43,7 @@ from simple_auction.services.conditions import DEFAULT_CONDITIONS, ConditionOpti
 from simple_auction.services.listing import (
     condition_desc,
     find_option,
+    has_condition_line,
 )
 from simple_auction.services.lookup import LookupResult
 from simple_auction.services.serial_links import SerialLink, build_url
@@ -53,7 +54,8 @@ from simple_auction.services.title_layout import (
     DEFAULT_FIELDS,
     GUN_TYPES,
     CustomField,
-    desc_lines,
+    desc_line_map,
+    has_desc_line,
     is_custom_key,
     labels,
     prefixes,
@@ -280,8 +282,8 @@ class LotForm(QWidget):
         # Fields written as "Label: value" lines at the top of the description,
         # and the lines/labels last written (so changes replace them).
         self._desc_fields = list(DEFAULT_DESC_FIELDS)
-        self._applied_desc_lines: list[str] | None = []
-        self._applied_desc_labels: list[str] = []
+        self._applied_desc_lines: dict[str, str] = {}
+        self._applied_desc_labels: dict[str, str] = {}
 
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_empty())
@@ -770,12 +772,9 @@ class LotForm(QWidget):
             edit.setText(lot.custom.get(key, ""))
             edit.setCursorPosition(0)
         self._applied_prefixes = dict(self._prefixes)
-        self._applied_desc_lines = desc_lines(
-            lot, self._desc_fields, labels(self._custom_fields)
-        )
-        self._applied_desc_labels = [
-            labels(self._custom_fields)[k] for k in self._desc_fields
-        ]
+        label_for = labels(self._custom_fields)
+        self._applied_desc_lines = desc_line_map(lot, self._desc_fields, label_for)
+        self._applied_desc_labels = {k: label_for[k] for k in self._desc_fields}
         # None (a lot from before title layouts) is kept so the title can be
         # recognised as written in the old default layout.
         self._applied_title_lot = lot
@@ -789,7 +788,9 @@ class LotForm(QWidget):
         self._loading = False
         self._dirty = False
         self.set_save_state("saved", strings.ALL_SAVED)
-        # May add the condition text to an older lot; that counts as an edit.
+        # Rewrites an older-style title in the current style. Generated text
+        # the user deleted isn't put back: it's only written when its value
+        # changes.
         self._apply_condition()
 
     def current_lot(self) -> Lot | None:
@@ -919,6 +920,24 @@ class LotForm(QWidget):
             custom=self._collect_custom(),
         )
 
+    def collect_for_save(self) -> Lot:
+        """The lot to save: as collect(), but with the title's generated parts
+        matching the saved fields. While a field is still being typed in its
+        value isn't in the title yet (that happens when editing finishes);
+        saving it with the old title would make the next load add the
+        generated text a second time."""
+        current = self.collect()
+        title = update_title(
+            self.title.text(),
+            self._applied_title_lot,
+            self._title_fields,
+            current,
+            self._title_fields,
+            self._prefixes,
+            self._applied_prefixes,
+        )
+        return replace(current, title=title)
+
     def set_custom_fields(self, fields: list[CustomField]) -> None:
         """The extra fields defined in Settings → Listing fields. An open lot
         keeps the values it has; call set_title_fields afterwards."""
@@ -1021,10 +1040,12 @@ class LotForm(QWidget):
             self.title_count.style().polish(self.title_count)
 
     def _apply_condition(self) -> None:
-        """Keep the title suffix and description sentence in sync with condition.
+        """Keep the title's generated parts and the description's condition
+        sentence in sync with the fields.
 
         Runs when a condition is picked, when the title is finished, and on load,
-        so the text shows up immediately rather than on save.
+        so the text shows up immediately rather than on save. Generated text
+        the user deleted stays deleted until the value it shows changes.
         """
         if self._lot is None or self._loading:
             return
@@ -1045,12 +1066,17 @@ class LotForm(QWidget):
         if title != self.title.text():
             self.title.setText(title)
         option = find_option(self._conditions, condition)
+        text = self.desc.toPlainText()
         # A condition that's been removed from Settings has no sentence to
-        # write, so the description is left as it is.
-        if option is not None or not condition:
+        # write, so the description is left as it is. An unchanged condition
+        # only refreshes a sentence that's there (e.g. new wording).
+        if (option is not None or not condition) and (
+            condition != self._applied_condition
+            or has_condition_line(text, [condition])
+        ):
             note = option.note if option else ""
-            desc = condition_desc(self.desc.toPlainText(), condition, note, known)
-            if desc != self.desc.toPlainText():
+            desc = condition_desc(text, condition, note, known)
+            if desc != text:
                 self.desc.setPlainText(desc)
         self._applied_condition = condition
 
@@ -1063,24 +1089,32 @@ class LotForm(QWidget):
 
     def _apply_desc_fields(self, current: Lot) -> None:
         """Rewrite the "Label: value" lines at the top of the description when
-        the chosen fields, their labels or their values changed."""
+        the chosen fields, their labels or their values changed. A line the
+        user deleted stays deleted until its value (or label) changes."""
         label_for = labels(self._custom_fields)
-        lines = desc_lines(current, self._desc_fields, label_for)
-        if lines == self._applied_desc_lines:
+        new = desc_line_map(current, self._desc_fields, label_for)
+        new_labels = {k: label_for[k] for k in self._desc_fields}
+        if new == self._applied_desc_lines and new_labels == self._applied_desc_labels:
             return
+        text = self.desc.toPlainText()
+        lines = [
+            line
+            for key, line in new.items()
+            if line != self._applied_desc_lines.get(key)
+            or has_desc_line(text, self._applied_desc_labels.get(key, ""))
+        ]
         # Remove lines written earlier (also under old labels), keep the rest.
-        known = [label_for[k] for k in self._desc_fields] + self._applied_desc_labels
-        desc = update_desc(self.desc.toPlainText(), known, lines)
-        if desc != self.desc.toPlainText():
+        known = [*new_labels.values(), *self._applied_desc_labels.values()]
+        desc = update_desc(text, known, lines)
+        if desc != text:
             self.desc.setPlainText(desc)
-        self._applied_desc_lines = lines
-        self._applied_desc_labels = [label_for[k] for k in self._desc_fields]
+        self._applied_desc_lines = new
+        self._applied_desc_labels = new_labels
 
     def set_desc_fields(self, fields: list[str]) -> None:
         """Fields written as lines at the top of the description (Settings)."""
         self._desc_fields = validate_desc(fields)
         if self._lot is not None and not self._loading:
-            self._applied_desc_lines = None  # force a rewrite in the new layout
             self._apply_desc_fields(self.collect())
 
     def _on_serial_done(self) -> None:

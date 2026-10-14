@@ -3,9 +3,8 @@
 import logging
 from collections.abc import Callable
 
-from PySide6.QtCore import QEventLoop, Qt, QThread, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QObject, Qt, QThread, QTimer
 from PySide6.QtWidgets import QApplication, QProgressDialog, QWidget
-from shiboken6 import isValid
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +33,40 @@ class _Progress(QProgressDialog):
         event.ignore()
 
 
+_E = QEvent.Type
+_INPUT_EVENTS = frozenset(
+    {
+        _E.KeyPress,
+        _E.KeyRelease,
+        _E.ShortcutOverride,
+        _E.Shortcut,
+        _E.InputMethod,
+        _E.MouseButtonPress,
+        _E.MouseButtonRelease,
+        _E.MouseButtonDblClick,
+        _E.Wheel,
+        _E.ContextMenu,
+        _E.TouchBegin,
+        _E.TouchUpdate,
+        _E.TouchEnd,
+        _E.TabletPress,
+        _E.TabletRelease,
+        _E.DragEnter,
+        _E.DragMove,
+        _E.Drop,
+    }
+)
+
+
+class _InputBlocker(QObject):
+    """Swallows user input app-wide. Unlike disabling the window, this leaves
+    widgets looking the same (no flash on every autosave) and keeps keyboard
+    focus where it is, so the field being typed in doesn't finish editing."""
+
+    def eventFilter(self, _obj, event) -> bool:
+        return event.type() in _INPUT_EVENTS
+
+
 def run_io[T](parent: QWidget, label: str, operation: Callable[[], T]) -> T:
     """Keep painting/timers alive, but block edits until a consistent result.
 
@@ -44,11 +77,9 @@ def run_io[T](parent: QWidget, label: str, operation: Callable[[], T]) -> T:
     progress.setCancelButton(None)
     progress.setWindowModality(Qt.WindowModality.ApplicationModal)
     # Block input immediately, even before the delayed progress window is shown.
-    # Disabling the parent strips focus from the field being typed in (autosave
-    # fires mid-edit), so remember it and hand focus back afterwards.
-    focused = QApplication.focusWidget()
-    enabled = parent.isEnabled()
-    parent.setEnabled(False)
+    app = QApplication.instance()
+    blocker = _InputBlocker()
+    app.installEventFilter(blocker)
     worker = _Worker(operation)
     loop = QEventLoop()
     worker.finished.connect(loop.quit)
@@ -72,13 +103,4 @@ def run_io[T](parent: QWidget, label: str, operation: Callable[[], T]) -> T:
         progress.reset()
         progress.hide()
         progress.deleteLater()
-        parent.setEnabled(enabled)
-        if (
-            focused is not None
-            and isValid(focused)
-            and focused.isVisible()
-            and focused.isEnabled()
-            and QApplication.focusWidget() is not focused
-        ):
-            focused.window().activateWindow()
-            focused.setFocus(Qt.FocusReason.OtherFocusReason)
+        app.removeEventFilter(blocker)

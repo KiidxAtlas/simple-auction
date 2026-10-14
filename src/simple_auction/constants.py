@@ -2,7 +2,7 @@ APP_NAME = "Simple Auction"
 
 # Autosave waits this long after the last edit, and retries this often if
 # the Excel file is open elsewhere.
-AUTOSAVE_MS = 700
+AUTOSAVE_MS = 2000
 AUTOSAVE_RETRY_MS = 3000
 
 # Lot titles, including the " - Excellent" condition suffix.

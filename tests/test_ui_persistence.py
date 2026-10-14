@@ -4,7 +4,8 @@ import time
 import pytest
 from PIL import Image, UnidentifiedImageError
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QVBoxLayout, QWidget
 
 from simple_auction.models import Lot
 from simple_auction.services import catalogue, excel, storage
@@ -34,13 +35,25 @@ def window(app, tmp_path, monkeypatch):
 
 def test_worker_keeps_gui_events_alive_and_blocks_edits(app):
     parent = QWidget()
+    edit = QLineEdit(parent)
+    QVBoxLayout(parent).addWidget(edit)
     parent.show()
+    parent.activateWindow()
+    edit.setFocus()
+    app.processEvents()
     gui_thread = threading.get_ident()
     ticks = []
     timer = QTimer()
     timer.setInterval(5)
-    timer.timeout.connect(lambda: ticks.append(parent.isEnabled()))
+
+    def tick():
+        QTest.keyClicks(edit, "x")
+        ticks.append((parent.isEnabled(), edit.hasFocus()))
+
+    timer.timeout.connect(tick)
     timer.start()
+    finished = []
+    edit.editingFinished.connect(lambda: finished.append(True))
 
     def operation():
         time.sleep(0.08)
@@ -50,8 +63,14 @@ def test_worker_keeps_gui_events_alive_and_blocks_edits(app):
         worker_thread = run_io(parent, "Saving…", operation)
         assert worker_thread != gui_thread
         assert len(ticks) >= 2
-        assert not any(ticks)
-        assert parent.isEnabled()
+        # Typing is blocked, but the window isn't greyed out and the field
+        # being typed in keeps focus (so it doesn't "finish" editing).
+        assert edit.text() == ""
+        assert all(enabled and focused for enabled, focused in ticks)
+        assert not finished
+        timer.stop()
+        QTest.keyClicks(edit, "y")
+        assert edit.text() == "y"
     finally:
         timer.stop()
         parent.close()
@@ -112,6 +131,49 @@ def test_failed_save_preserves_dirty_form_and_reports_actual_error(window, monke
     assert messages[-1][0] == strings.ERROR_TITLE
     assert "bad-photo.jpg" in messages[-1][1]
     assert "Excel" not in messages[-1][1]
+
+
+def test_save_while_typing_in_a_field_does_not_duplicate_title_text(window):
+    window.show()
+    window.create_auction()
+    auction_no, lot_no = window.auction_no, window.lot_no
+    form = window.form
+    form.make.setText("Colt")
+    form.title.setText("Nice gun")
+    form._apply_title_fields()
+    assert window.flush()
+    assert form.title.text() == "Colt Nice gun"
+    window.activateWindow()
+    form.model.setFocus()
+    QApplication.processEvents()
+    QTest.keyClicks(form.model, "Python")
+    assert window.flush()  # autosave while Model still has focus
+    saved = excel.load_auction(window._path(auction_no))[0]
+    assert saved.title == "Colt Python Nice gun"
+    window._autosave.stop()
+    window.create_lot(auction_no)
+    window._autosave.stop()
+    window.open_lot(auction_no, lot_no)
+    assert form.title.text() == "Colt Python Nice gun"
+
+
+def test_edits_made_while_saving_stay_unsaved(window, monkeypatch):
+    window.create_auction()
+    window.form.title.setText("First")
+    save = catalogue.save
+
+    def slow_save(*args):
+        time.sleep(0.15)
+        return save(*args)
+
+    monkeypatch.setattr(catalogue, "save", slow_save)
+    # e.g. a serial lookup result arriving while the save runs
+    QTimer.singleShot(20, lambda: window.form.title.setText("Second"))
+    assert window.flush()
+    assert excel.load_auction(window._path(window.auction_no))[0].title == "First"
+    assert window.form.title.text() == "Second"
+    assert window.form.is_dirty()
+    assert window._autosave.isActive()
 
 
 def test_workbook_write_failure_uses_workbook_warning_and_retries(window, monkeypatch):

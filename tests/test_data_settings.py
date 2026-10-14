@@ -110,10 +110,65 @@ def test_the_previous_default_title_layout_gains_c_and_r(tmp_path):
 def test_title_length_and_empty_condition_only():
     fields = list(DEFAULT_FIELDS)
     lot = Lot(1, condition="Good")
-    assert update_title("", lot, fields, lot, fields) == ""
-    title = update_title("x" * 150, lot, fields, lot, fields)
+    assert update_title("", Lot(1), fields, lot, fields) == ""
+    title = update_title("x" * 150, Lot(1), fields, lot, fields)
     assert len(title) == 100
     assert title.endswith(" Good Condition")
+
+
+def test_deleted_title_parts_stay_deleted_until_their_value_changes():
+    fields = list(DEFAULT_FIELDS)
+    lot = Lot(1, make="Colt", model="Python", serial="X1", condition="Good")
+    title = update_title("Nice gun", Lot(1), fields, lot, fields)
+    assert title == "Colt Python Nice gun SN: X1 Good Condition"
+    saved = replace(lot, title_fields=fields)
+    edited = "Python Nice gun SN: X1"  # the make and condition were deleted
+    assert update_title(edited, saved, fields, saved, fields) == edited
+    changed = replace(saved, make="Ruger", condition="Fair")
+    assert update_title(edited, saved, fields, changed, fields) == (
+        "Ruger Python Nice gun SN: X1 Fair Condition"
+    )
+    # Other parts are still recognised and replaced, not added again.
+    assert update_title(
+        edited, saved, fields, replace(saved, model="1911"), fields
+    ) == ("1911 Nice gun SN: X1")
+
+
+def test_editor_does_not_put_back_deleted_generated_text(app):
+    form = LotForm()
+    form.set_desc_fields(["make", "model"])
+    form.load(Lot(1), 41000)
+    form.make.setText("Colt")
+    form.model.setText("Python")
+    form.title.setText("Nice gun")
+    form.condition.setCurrentIndex(form.condition.findText("Good"))
+    form._apply_title_fields()
+    assert form.title.text() == "Colt Python Nice gun Good Condition"
+    assert form.desc.toPlainText().startswith("Make: Colt\nModel: Python\n\n")
+    assert "Condition: Good." in form.desc.toPlainText()
+    # Delete the make and condition from the title, and the Make line and
+    # condition sentence from the description.
+    form.title.setText("Python Nice gun")
+    form.title.editingFinished.emit()
+    form.desc.setPlainText("Model: Python\n\nBlued.")
+    form._apply_title_fields()  # e.g. finishing another field
+    assert form.title.text() == "Python Nice gun"
+    assert form.desc.toPlainText() == "Model: Python\n\nBlued."
+    saved = form.collect_for_save()
+    assert saved.title == "Python Nice gun"
+    reopened = LotForm()
+    reopened.load(saved, 41000)
+    reopened._apply_title_fields()
+    assert reopened.title.text() == "Python Nice gun"
+    assert reopened.desc.toPlainText() == "Model: Python\n\nBlued."
+    # A changed value is written again.
+    form.make.setText("Ruger")
+    form._apply_title_fields()
+    assert form.title.text() == "Ruger Python Nice gun"
+    assert form.desc.toPlainText() == "Make: Ruger\nModel: Python\n\nBlued."
+    for f in (form, reopened):
+        f.mark_saved()
+        f.deleteLater()
 
 
 def test_config_title_fields_roundtrip_and_legacy(tmp_path):
@@ -258,7 +313,10 @@ def test_lot_editor_defaults_optional_fields_and_reorder(app):
 
 def test_disabling_condition_in_title_keeps_description(app):
     form = LotForm()
-    form.load(Lot(1, title="Colt - Good", condition="Good"), 41000)
+    form.load(
+        Lot(1, title="Colt - Good", condition="Good", desc="Condition: Good."),
+        41000,
+    )
     form.set_title_fields(["title"])
     assert form.title.text() == "Colt"
     form.title.editingFinished.emit()
@@ -373,11 +431,18 @@ def test_lot_editor_shows_custom_fields_and_puts_them_in_the_title(app):
     assert form.custom_card.isHidden()
     form.set_custom_fields([caliber])
     form.set_title_fields(["make", "title", caliber.key])
-    form.load(Lot(1, make="Colt", custom={"cal1": ".45 ACP", "gone": "kept"}), 1000)
+    form.load(
+        Lot(
+            1,
+            make="Colt",
+            title="Colt Government Cal: .45 ACP",
+            custom={"cal1": ".45 ACP", "gone": "kept"},
+        ),
+        1000,
+    )
     assert not form.custom_card.isHidden()
     edit = form._custom_inputs["cal1"]
     assert edit.text() == ".45 ACP"
-    form.title.setText("Colt Government")
     form._apply_title_fields()
     assert form.title.text() == "Colt Government Cal: .45 ACP"
     edit.setText(".38 Special")
@@ -440,6 +505,23 @@ def test_description_layout_persists_and_rejects_title_and_condition(tmp_path):
         Config.load(path)
 
 
+def test_the_previous_default_description_layout_is_upgraded(tmp_path):
+    from simple_auction.services.title_layout import (
+        DEFAULT_DESC_FIELDS,
+        PREVIOUS_DEFAULT_DESC_FIELDS,
+    )
+
+    path = tmp_path / "config.json"
+    raw = {"base_dir": str(tmp_path), "desc_fields": list(PREVIOUS_DEFAULT_DESC_FIELDS)}
+    path.write_text(json.dumps(raw))
+    assert Config.load(path).desc_fields == list(DEFAULT_DESC_FIELDS)
+    assert "make" not in DEFAULT_DESC_FIELDS and "model" not in DEFAULT_DESC_FIELDS
+    # A layout the user chose themselves is kept, even with make and model.
+    raw["desc_fields"] = ["make", "model"]
+    path.write_text(json.dumps(raw))
+    assert Config.load(path).desc_fields == ["make", "model"]
+
+
 def test_lot_editor_builds_the_house_style_title_from_its_fields(app):
     form = LotForm()
     form.load(Lot(1), 1000)
@@ -451,6 +533,7 @@ def test_lot_editor_builds_the_house_style_title_from_its_fields(app):
     ):
         edit.setText(value)
     form.gun_type.setCurrentText("Rifle")
+    form.barrel_length.setText("16 inches")
     form.ca_legality.setCurrentText("Legal for CA")
     form.condition.setCurrentText("Excellent")
     form._apply_title_fields()
@@ -459,10 +542,13 @@ def test_lot_editor_builds_the_house_style_title_from_its_fields(app):
     )
     lot = form.collect()
     assert (lot.caliber, lot.gun_type) == ("7.62x39", "Rifle")
-    # Caliber and type head the description too, and are kept per lot.
+    # Caliber, type and barrel length head the description; make and model
+    # are only in the title.
     assert form.desc.toPlainText().startswith(
-        "Make: Arsenal\nModel: SAM7SF\nCaliber: 7.62x39\nType: Rifle"
+        "Caliber: 7.62x39\nType: Rifle\nBarrel length: 16 inches"
     )
+    assert "Make:" not in form.desc.toPlainText()
+    assert "Model:" not in form.desc.toPlainText()
     form.mark_saved()
     form.deleteLater()
 

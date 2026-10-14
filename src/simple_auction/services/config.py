@@ -21,6 +21,7 @@ from simple_auction.services.title_layout import (
     DEFAULT_DESC_FIELDS,
     DEFAULT_FIELDS,
     LEGACY_DEFAULT_FIELDS,
+    PREVIOUS_DEFAULT_DESC_FIELDS,
     PREVIOUS_DEFAULT_FIELDS,
     CustomField,
     custom_fields_from_json,
@@ -127,6 +128,11 @@ class Config:
         # changed is kept as it is.
         if title_fields in (list(LEGACY_DEFAULT_FIELDS), list(PREVIOUS_DEFAULT_FIELDS)):
             title_fields = list(DEFAULT_FIELDS)
+        desc_fields = validate_desc(
+            data.get("desc_fields", list(DEFAULT_DESC_FIELDS)), custom
+        )
+        if desc_fields == list(PREVIOUS_DEFAULT_DESC_FIELDS):
+            desc_fields = list(DEFAULT_DESC_FIELDS)
         config = cls(
             base_dir=Path(base),
             photos_dir=Path(photos),
@@ -136,9 +142,7 @@ class Config:
             dark_mode=dark_mode,
             sharing=sharing,
             title_fields=title_fields,
-            desc_fields=validate_desc(
-                data.get("desc_fields", list(DEFAULT_DESC_FIELDS)), custom
-            ),
+            desc_fields=desc_fields,
             custom_fields=custom,
         )
         return config, data

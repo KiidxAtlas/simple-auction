@@ -1,11 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.1.8 — 2026-10-14
+
+### Changed
+
+- The description now starts with Caliber, Type and Barrel length; Make and
+  Model are no longer added there (they're still in the title). If you
+  never changed the description fields in Settings → Listing fields, you
+  get the new layout automatically; a layout you chose yourself is kept.
 
 ### Fixed
 
 - Settings → Listing fields no longer gets wider than the window with wide
   system fonts; long field labels wrap.
+- The title no longer sometimes gets make/model (or other field) text added
+  a second time. Autosaving while you were still typing in a field could
+  save that field without its text in the title, so it was added again the
+  next time the lot was opened.
+- Edits that arrive while a save is running (e.g. a serial lookup result)
+  are no longer marked as saved before they are.
+- Autosave waits 2 seconds after you stop typing (was 0.7) and no longer
+  greys out the window for a moment while it saves.
+- Text the app fills in for you — the make, model, condition and other
+  fields in the title, the "Make: …" lines at the top of the description,
+  and the condition sentence — no longer comes back after you delete it,
+  including after saving and reopening the lot. It's written again only
+  when you change the value it comes from.
 
 ## 0.1.7 — 2026-10-14
 

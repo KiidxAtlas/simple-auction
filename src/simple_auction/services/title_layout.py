@@ -46,7 +46,10 @@ LEGACY_DEFAULT_FIELDS = ("make", "model", "serial", "title", "condition")
 PREVIOUS_DEFAULT_FIELDS = DEFAULT_FIELDS[:-1]  # before C&R was added
 # Description lines; the condition sentence is always added at the end
 # separately (see listing.condition_desc), so it isn't one of these.
-DEFAULT_DESC_FIELDS = ("make", "model", "caliber", "gun_type")
+DEFAULT_DESC_FIELDS = ("caliber", "gun_type", "barrel_length")
+# The earlier built-in default; a saved layout that's exactly this is
+# upgraded to DEFAULT_DESC_FIELDS (see Config).
+PREVIOUS_DEFAULT_DESC_FIELDS = ("make", "model", "caliber", "gun_type")
 DESC_EXCLUDED = frozenset({"title", "condition"})
 CA_LEGALITY = ("N/A", "Legal for CA", "Not CA legal")
 GUN_TYPES = ("Rifle", "Shotgun", "Handgun")
@@ -190,13 +193,27 @@ def field_text(lot: Lot, key: str) -> str:
     return "" if key == "ca_legality" and text == "N/A" else text
 
 
-def desc_lines(lot: Lot, fields: list[str], label_for: dict[str, str]) -> list[str]:
-    """The generated start of the description: "Make: Colt", one per filled field."""
-    return [
-        f"{label_for.get(key, key)}: {text}"
+def desc_line_map(
+    lot: Lot, fields: list[str], label_for: dict[str, str]
+) -> dict[str, str]:
+    """{field key: "Make: Colt"} for each filled field, in layout order."""
+    return {
+        key: f"{label_for.get(key, key)}: {text}"
         for key in fields
         if (text := field_text(lot, key))
-    ]
+    }
+
+
+def desc_lines(lot: Lot, fields: list[str], label_for: dict[str, str]) -> list[str]:
+    """The generated start of the description: "Make: Colt", one per filled field."""
+    return list(desc_line_map(lot, fields, label_for).values())
+
+
+def has_desc_line(desc: str, label: str) -> bool:
+    """Whether the description has a "<label>: ..." line."""
+    if not label:
+        return False
+    return re.search(rf"^{re.escape(label)}:", desc, re.MULTILINE) is not None
 
 
 def update_desc(desc: str, replace_labels: list[str], lines: list[str]) -> str:
@@ -247,34 +264,54 @@ def _value(lot: Lot, key: str, prefix_for: dict[str, str], legacy: bool) -> str:
     return text
 
 
-def _edges(
-    lot: Lot, fields: list[str], prefix_for: dict[str, str], legacy: bool = False
-) -> tuple[str, str]:
-    pivot = fields.index("title")
-
-    def join(keys):
-        return " ".join(
-            filter(None, (_value(lot, k, prefix_for, legacy) for k in keys))
-        )
-
-    return join(fields[:pivot]), join(fields[pivot + 1 :])
+def _starts(text: str, part: str) -> bool:
+    """`text` starts with the word(s) `part` (case-insensitive)."""
+    return text.casefold().startswith(part.casefold()) and (
+        len(text) == len(part) or text[len(part)] == " "
+    )
 
 
-def _strip(rest: str, prefix: str, suffix: str, joiner: str) -> str | None:
-    """`rest` without the generated start/end, or None if neither is there."""
-    folded, matched = rest.casefold(), False
-    if suffix:
-        if folded == suffix.casefold():
-            return ""
-        if folded.endswith((joiner + suffix).casefold()):
-            rest = rest[: -len(suffix) - len(joiner)].strip()
-            folded, matched = rest.casefold(), True
-    if prefix and (
-        folded == prefix.casefold() or folded.startswith(prefix.casefold() + " ")
-    ):
-        rest = rest[len(prefix) :].strip()
-        matched = True
-    return rest if matched else None
+def _ends(text: str, part: str) -> bool:
+    return text.casefold().endswith(part.casefold()) and (
+        len(text) == len(part) or text[-len(part) - 1] == " "
+    )
+
+
+def _strip(
+    rest: str,
+    lot: Lot,
+    layout: list[str],
+    prefix_for: dict[str, str],
+    legacy: bool,
+) -> tuple[str, set[str]]:
+    """`rest` without the generated parts written for `lot` in `layout`, and
+    the keys whose text was found. Parts are matched one at a time, so a
+    part the user deleted doesn't stop the others being recognised."""
+    pivot = layout.index("title")
+    found = set()
+    for key in layout[:pivot]:
+        part = _value(lot, key, prefix_for, legacy)
+        if part and _starts(rest, part):
+            rest = rest[len(part) :].strip()
+            found.add(key)
+    tail = layout[pivot + 1 :]
+    if legacy:
+        # Older titles ended " - <suffix>", written as a whole.
+        values = {k: v for k in tail if (v := _value(lot, k, prefix_for, True))}
+        suffix = " ".join(values.values())
+        if suffix and rest.casefold() == suffix.casefold():
+            rest = ""
+            found |= set(values)
+        elif suffix and rest.casefold().endswith(f" - {suffix}".casefold()):
+            rest = rest[: -len(suffix) - 3].strip()
+            found |= set(values)
+        return rest, found
+    for key in reversed(tail):
+        part = _value(lot, key, prefix_for, False)
+        if part and _ends(rest, part):
+            rest = rest[: -len(part)].strip()
+            found.add(key)
+    return rest, found
 
 
 def update_title(
@@ -287,10 +324,12 @@ def update_title(
     old_prefix_for: dict[str, str] | None = None,
     max_length: int = TITLE_MAX_LENGTH,
 ) -> str:
-    """Replace only generated edges, retaining the user's words in between.
+    """Replace only generated parts, retaining the user's words in between.
 
-    `prefix_for` maps custom field keys to the text written before their
-    value; `old_prefix_for` is what the current title was built with
+    `old` is the lot the title's generated parts were last written for. A
+    part the user deleted from the title stays deleted until its value
+    changes. `prefix_for` maps custom field keys to the text written before
+    their value; `old_prefix_for` is what the current title was built with
     (defaults to `prefix_for`). Titles in the older style ("S/N:", a dash
     before the condition) are recognised and rewritten in the current one.
     """
@@ -298,26 +337,35 @@ def update_title(
     old_prefix_for = prefix_for if old_prefix_for is None else old_prefix_for
     rest = title.strip()
     layout = old.title_fields if old.title_fields is not None else old_fields
-    attempts = [(layout, False, " "), (layout, True, " - ")]
+    attempts = [(layout, False), (layout, True)]
     if old.title_fields is None:
-        attempts.append((list(LEGACY_DEFAULT_FIELDS), True, " - "))
+        attempts.append((list(LEGACY_DEFAULT_FIELDS), True))
     # The reading that removes the most generated text wins (the first on a
     # tie), so an older title isn't mistaken for a partial match.
     best = None
-    for old_layout, legacy, joiner in attempts:
-        prefix, suffix = _edges(old, old_layout, old_prefix_for, legacy)
-        stripped = _strip(rest, prefix, suffix, joiner)
-        if stripped is not None and (best is None or len(stripped) < len(best)):
-            best = stripped
-    if best is not None:
-        rest = best
-    before, after = _edges(new, fields, prefix_for)
+    for old_layout, legacy in attempts:
+        stripped, found = _strip(rest, old, old_layout, old_prefix_for, legacy)
+        if found and (best is None or len(stripped) < len(best[0])):
+            best = (stripped, found, old_layout)
+    rest, found, old_layout = best if best is not None else (rest, set(), layout)
+
+    def kept(key: str) -> str:
+        """A part's new text, unless the user deleted it and it's unchanged."""
+        text = _value(new, key, prefix_for, False)
+        if (
+            text
+            and key not in found
+            and key in old_layout
+            and field_text(old, key) == field_text(new, key)
+        ):
+            return ""
+        return text
+
     pivot = fields.index("title")
-    describes = any(
-        _value(new, k, prefix_for, False)
-        for k in fields[pivot + 1 :]
-        if k not in _QUALIFIERS
-    )
+    before = " ".join(filter(None, map(kept, fields[:pivot])))
+    after_keys = fields[pivot + 1 :]
+    after = " ".join(filter(None, map(kept, after_keys)))
+    describes = any(kept(k) for k in after_keys if k not in _QUALIFIERS)
     base = " ".join(part for part in (before, rest) if part)
     # A condition alone should not create a title for an otherwise empty lot.
     if not base and not describes:

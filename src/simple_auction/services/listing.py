@@ -59,6 +59,16 @@ def condition_desc(
     return f"{base}\n\n{line}" if base else line
 
 
+def has_condition_line(desc: str, names: Iterable[str]) -> bool:
+    """Whether the description has the "Condition: <name>." sentence for
+    any of `names`."""
+    alts = _any_of(names)
+    if not alts:
+        return False
+    line_re = rf"^Condition:\s*(?:{alts})\."
+    return re.search(line_re, desc, re.MULTILINE | re.IGNORECASE) is not None
+
+
 def find_option(options: list[ConditionOption], name: str) -> ConditionOption | None:
     return next((o for o in options if o.name.lower() == name.lower()), None)
 
