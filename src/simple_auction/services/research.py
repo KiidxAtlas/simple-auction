@@ -1,7 +1,15 @@
-"""Research a lot with Gemini (plus Google Search), as a running conversation."""
+"""Research a lot with Gemini (plus Google Search), as a running conversation.
 
+Besides questions, a chat can suggest values for the lot's empty fields
+("auto-fill"), and it can send the lot's photos so Gemini can see the item.
+"""
+
+import base64
+import json
+import logging
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from google import genai
 
@@ -12,12 +20,17 @@ from google.genai._gaos.lib import compat_errors
 from simple_auction.constants import RESEARCH_MODEL
 from simple_auction.models import Lot
 from simple_auction.services import api_key
+from simple_auction.services.image import research_image
+from simple_auction.services.title_layout import GUN_TYPES, CustomField
+
+log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
 You are a research assistant for staff at a firearms auction house who are \
 cataloguing consigned items. Each conversation is about one lot. Its catalogue \
 details are given in <lot_details> tags, and staff may update them during the \
-conversation.
+conversation. Photos of the lot may be attached; use them to identify the \
+item and read markings, and say when a photo is unclear.
 
 When asked to research the lot, give a briefing a cataloguer can use: what the \
 item is (maker, model, variant), when and where it was made, including what \
@@ -33,6 +46,28 @@ can't be confirmed, rather than guessing. Keep answers skimmable with short \
 headings or bullet points, and don't repeat the lot details back."""
 
 RESEARCH_REQUEST = "Research this lot for the catalogue."
+
+AUTOFILL_REQUEST = """\
+Suggest catalogue values for this lot's fields, as JSON matching the schema. \
+Use the lot details, the photos and what you've found in this conversation. \
+Fill a field only when the details, the photos or reliable sources support it; \
+otherwise leave it as an empty string. Never invent serial numbers: give one \
+only if it is legible in a photo. Give years as four digits and lengths with \
+their units (e.g. 26 inches)."""
+
+# Fields auto-fill may suggest: (Lot attribute, label, guidance for Gemini).
+AUTOFILL_FIELDS = [
+    ("make", "Make", "The manufacturer, e.g. Remington."),
+    ("model", "Model", "The model and variant, e.g. SAM7SF or 870 Wingmaster."),
+    ("caliber", "Caliber", "Caliber or gauge as marked, e.g. 7.62x39 or 12 GA."),
+    ("gun_type", "Type", "One of Rifle, Shotgun or Handgun."),
+    ("year", "Year", "Year of manufacture, four digits."),
+    ("serial", "Serial number", "Only if legible in a photo."),
+    ("barrel_length", "Barrel length", "With units, e.g. 28 inches."),
+]
+CUSTOM_KEY = "custom_{id}"  # schema property for a custom field
+
+MAX_PHOTOS = 6  # sent per lot; the first ones in the lot's order
 
 _TOOLS = [{"type": "google_search"}]
 
@@ -52,13 +87,15 @@ class Event:
     """One step of a streamed answer.
 
     kind is "text" (a piece of the answer), "searching", "reading",
-    "no_search" (answering without Google Search), "done" (with sources)
+    "no_search" (answering without Google Search), "photos" (text says how
+    many were sent), "done" (with sources), "filled" (auto-fill `values`)
     or "refused".
     """
 
     kind: str
     text: str = ""
     sources: list[tuple[str, str]] = field(default_factory=list)  # (title, url)
+    values: dict[str, str] = field(default_factory=dict)
 
 
 class MissingApiKeyError(Exception):
@@ -69,19 +106,98 @@ class ResearchFailedError(Exception):
     """Gemini reported an error part-way through an answer."""
 
 
-def describe_lot(lot: Lot) -> str:
+def describe_lot(lot: Lot, custom_fields: list[CustomField] = ()) -> str:
     """The lot fields sent for research. Owner and book # stay local."""
     fields = [
         ("Lot number", str(lot.lot_number)),
         ("Make", lot.make),
         ("Model", lot.model),
+        ("Caliber", lot.caliber),
+        ("Type", lot.gun_type),
         ("Title", lot.title),
         ("Serial number", lot.serial),
         ("Year of manufacture (as catalogued)", str(lot.year or "")),
+        ("Barrel length", lot.barrel_length),
         ("Condition", lot.condition),
+        ("C&R eligible", "Yes" if lot.c_and_r else ""),
+        *((f.label, lot.custom.get(f.id, "")) for f in custom_fields),
         ("Description", lot.desc),
     ]
     return "\n".join(f"{name}: {value}" for name, value in fields if value)
+
+
+def photo_key(lot: Lot) -> tuple:
+    """Identifies the photos that would be sent, to resend only on change."""
+    key = []
+    for path in lot.photos[:MAX_PHOTOS]:
+        try:
+            stat = Path(path).stat()
+        except OSError:
+            continue
+        key.append((str(path), stat.st_mtime_ns, stat.st_size))
+    return tuple(key)
+
+
+def _image_parts(paths: list[Path]) -> list[dict]:
+    parts = []
+    for path in paths:
+        prepared = research_image(Path(path))
+        if prepared is None:
+            log.warning("Couldn't prepare %s for research", path)
+            continue
+        data, mime = prepared
+        parts.append(
+            {
+                "type": "image",
+                "data": base64.b64encode(data).decode("ascii"),
+                "mime_type": mime,
+            }
+        )
+    return parts
+
+
+def autofill_schema(custom_fields: list[CustomField]) -> dict:
+    properties = {
+        key: {"type": "string", "description": f"{label}. {hint}"}
+        for key, label, hint in AUTOFILL_FIELDS
+    }
+    for custom in custom_fields:
+        properties[CUSTOM_KEY.format(id=custom.id)] = {
+            "type": "string",
+            "description": custom.label,
+        }
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+    }
+
+
+def parse_autofill(text: str, custom_fields: list[CustomField]) -> dict[str, str]:
+    """Suggestions from Gemini's JSON: {Lot attribute, or a custom field's
+    title key ("custom:<id>"): value}.
+    Empty, malformed and unexpected values are dropped."""
+    try:
+        data = json.loads(text)
+    except ValueError as e:
+        raise ResearchFailedError("auto-fill answer wasn't valid JSON") from e
+    if not isinstance(data, dict):
+        raise ResearchFailedError("auto-fill answer wasn't a JSON object")
+    keys = {key: key for key, _label, _hint in AUTOFILL_FIELDS}
+    keys |= {CUSTOM_KEY.format(id=f.id): f.key for f in custom_fields}
+    values = {}
+    for key, target in keys.items():
+        value = data.get(key)
+        if not isinstance(value, str) or not (value := " ".join(value.split())):
+            continue
+        if target == "year" and not (value.isdigit() and len(value) == 4):
+            continue
+        if target == "gun_type":
+            value = next(
+                (t for t in GUN_TYPES if t.casefold() == value.casefold()), value
+            )
+        values[target] = value[:200]
+    return values
 
 
 def make_client() -> genai.Client:
@@ -91,6 +207,15 @@ def make_client() -> genai.Client:
     return genai.Client(api_key=key)
 
 
+@dataclass
+class _Sent:
+    """What a request includes, recorded once Gemini has answered it."""
+
+    context: str
+    photos: tuple
+    photo_count: int = 0
+
+
 class ResearchChat:
     """A conversation about one lot. Not thread-safe: one question at a time.
 
@@ -98,19 +223,29 @@ class ResearchChat:
     with previous_interaction_id.
     """
 
-    def __init__(self, client: genai.Client | None = None) -> None:
+    def __init__(
+        self,
+        client: genai.Client | None = None,
+        *,
+        custom_fields: list[CustomField] = (),
+        include_photos: bool = True,
+    ) -> None:
         self._client = client
         self._previous_id: str | None = None
         self._sent_context: str | None = None
+        self._sent_photos: tuple = ()
+        self.custom_fields = list(custom_fields)
+        self.include_photos = include_photos
 
     def ask(self, question: str, lot: Lot) -> Iterator[Event]:
         """Stream the answer to `question`.
 
         Lot details go along with the first question, and again whenever
-        they've changed. The conversation only moves on once an answer
-        completes, so a failed or stopped question can simply be asked again.
+        they've changed; the same for photos. The conversation only moves on
+        once an answer completes, so a failed or stopped question can simply
+        be asked again.
         """
-        context, request = self._request(question, lot)
+        sent, request = self._request(question, lot)
         if self._client is None:
             self._client = make_client()
         global _search_blocked
@@ -122,6 +257,8 @@ class ResearchChat:
             del request["tools"]
             stream = self._client.interactions.create(**request)
             _search_blocked = True
+        if sent.photo_count:
+            yield Event("photos", str(sent.photo_count))
         if "tools" not in request:
             yield Event("no_search")
         response = _Response()
@@ -134,24 +271,41 @@ class ResearchChat:
             close = getattr(stream, "close", None)
             if close:
                 close()
-        yield response.finish(self, context)
+        yield response.finish(self, sent)
 
-    def _request(self, question: str, lot: Lot) -> tuple[str, dict]:
-        context = describe_lot(lot)
-        content = question
+    def _request(
+        self, question: str, lot: Lot, *, schema: dict | None = None
+    ) -> tuple[_Sent, dict]:
+        context = describe_lot(lot, self.custom_fields)
+        photos = photo_key(lot) if self.include_photos else ()
+        text = question
         if context != self._sent_context:
-            content = f"<lot_details>\n{context}\n</lot_details>\n\n{question}"
+            text = f"<lot_details>\n{context}\n</lot_details>\n\n{question}"
+        content: str | list[dict] = text
+        sent = _Sent(context, photos)
+        if photos and photos != self._sent_photos:
+            images = _image_parts([Path(p) for p, _mtime, _size in photos])
+            if images:
+                note = f"\n\n({len(images)} photo(s) of the lot attached.)"
+                content = [{"type": "text", "text": text + note}, *images]
+                sent.photo_count = len(images)
         request = {
             "model": RESEARCH_MODEL,
             "input": content,
             "system_instruction": SYSTEM_PROMPT,
             "stream": True,
         }
+        if schema is not None:
+            request["response_format"] = {
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": schema,
+            }
         if not _search_blocked:
             request["tools"] = _TOOLS
         if self._previous_id:
             request["previous_interaction_id"] = self._previous_id
-        return context, request
+        return sent, request
 
     async def ask_async(self, question: str, lot: Lot) -> AsyncIterator[Event]:
         """Cancelable request, including waits for headers and stalled streams.
@@ -159,7 +313,29 @@ class ResearchChat:
         Own clients are scoped to one event loop/turn, while conversation IDs
         remain on this chat. Cancellation never advances an unfinished turn.
         """
-        context, request = self._request(question, lot)
+        sent, request = self._request(question, lot)
+        async for event in self._stream_async(sent, request):
+            yield event
+
+    async def autofill_async(self, lot: Lot) -> AsyncIterator[Event]:
+        """Suggest values for the lot's fields: progress events, then one
+        "filled" event (or "refused"). It is a turn of the conversation, so
+        Gemini can use what was researched and the photos already sent."""
+        sent, request = self._request(
+            AUTOFILL_REQUEST, lot, schema=autofill_schema(self.custom_fields)
+        )
+        answer = []
+        async for event in self._stream_async(sent, request):
+            if event.kind == "text":
+                answer.append(event.text)
+            elif event.kind == "done":
+                yield Event(
+                    "filled", values=parse_autofill("".join(answer), self.custom_fields)
+                )
+            else:
+                yield event
+
+    async def _stream_async(self, sent: _Sent, request: dict) -> AsyncIterator[Event]:
         client = self._client or make_client()
         owned = self._client is None
         stream = None
@@ -173,6 +349,8 @@ class ResearchChat:
                 del request["tools"]
                 stream = await client.aio.interactions.create(**request)
                 _search_blocked = True
+            if sent.photo_count:
+                yield Event("photos", str(sent.photo_count))
             if "tools" not in request:
                 yield Event("no_search")
             response = _Response()
@@ -180,7 +358,7 @@ class ResearchChat:
                 event = response.consume(raw)
                 if event is not None:
                     yield event
-            yield response.finish(self, context)
+            yield response.finish(self, sent)
         finally:
             try:
                 if stream is not None:
@@ -224,9 +402,10 @@ class _Response:
                 raise ResearchFailedError(message or "unknown error")
         return None
 
-    def finish(self, chat: ResearchChat, context: str) -> Event:
+    def finish(self, chat: ResearchChat, sent: _Sent) -> Event:
         if self.status != "completed":
             return Event("refused")
         chat._previous_id = self.interaction_id
-        chat._sent_context = context
+        chat._sent_context = sent.context
+        chat._sent_photos = sent.photos
         return Event("done", sources=[(t, u) for u, t in self.sources.items()])

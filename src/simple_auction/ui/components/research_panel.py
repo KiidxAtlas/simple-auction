@@ -7,8 +7,9 @@ from dataclasses import dataclass, field
 import httpx
 from google.genai import errors
 from google.genai._gaos.lib import compat_errors as ce
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -22,12 +23,16 @@ from PySide6.QtWidgets import (
 
 from simple_auction.models import Lot
 from simple_auction.services.research import (
+    AUTOFILL_FIELDS,
+    AUTOFILL_REQUEST,
     RESEARCH_REQUEST,
     MissingApiKeyError,
     ResearchChat,
     ResearchFailedError,
 )
+from simple_auction.services.title_layout import CustomField
 from simple_auction.ui import strings, theme
+from simple_auction.ui.autofill_dialog import AutofillDialog
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +46,7 @@ class _Turn:
     sources: list[tuple[str, str]] = field(default_factory=list)
     notice: str = ""  # why the answer is missing or cut short
     note: str = ""  # about how the answer was made (e.g. without web search)
+    photos: int = 0  # photos sent along with this question
 
 
 def _api_message(e: ce.APIStatusError) -> str:
@@ -59,14 +65,19 @@ class _Job(QObject):
     text = Signal(str)
     status = Signal(str)
     done = Signal(list)
+    filled = Signal(dict)  # auto-fill suggestions
+    photos = Signal(str)  # how many photos went with the question
     refused = Signal()
     note = Signal(str)
     failed = Signal(str)
     finished = Signal()
 
-    def __init__(self, chat: ResearchChat, question: str, lot: Lot) -> None:
+    def __init__(
+        self, chat: ResearchChat, question: str, lot: Lot, *, autofill: bool = False
+    ) -> None:
         super().__init__()
         self._chat, self._question, self._lot = chat, question, lot
+        self._autofill = autofill
         self._stop = threading.Event()
         self._state_lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -96,7 +107,11 @@ class _Job(QObject):
             if self._stop.is_set():
                 self._loop = self._task = None
                 return
-        events = self._chat.ask_async(self._question, self._lot)
+        events = (
+            self._chat.autofill_async(self._lot)
+            if self._autofill
+            else self._chat.ask_async(self._question, self._lot)
+        )
         try:
             async for event in events:
                 if self._stop.is_set():
@@ -108,12 +123,16 @@ class _Job(QObject):
                         self.status.emit(strings.RESEARCH_SEARCHING)
                     case "reading":
                         self.status.emit(strings.RESEARCH_READING)
+                    case "photos":
+                        self.photos.emit(event.text)
                     case "no_search":
                         self.note.emit(strings.RESEARCH_NO_SEARCH)
                     case "refused":
                         self.refused.emit()
                     case "done":
                         self.done.emit(event.sources)
+                    case "filled":
+                        self.filled.emit(event.values)
         except asyncio.CancelledError:
             pass  # a deliberate Stop, not an API failure
         except MissingApiKeyError:
@@ -159,15 +178,19 @@ class _Job(QObject):
 
 class ResearchPanel(QFrame):
     closed = Signal()
+    apply_requested = Signal(dict)  # reviewed auto-fill values: {key: value}
 
     def __init__(self, lot_provider: Callable[[], Lot | None]) -> None:
         super().__init__()
         self.setObjectName("researchPanel")
         self.setMinimumWidth(theme.RESEARCH_MIN_WIDTH)
         self._lot_provider = lot_provider
+        self._custom_fields: list[CustomField] = []
         self._chat = ResearchChat()
         self._turns: list[_Turn] = []
         self._job: _Job | None = None
+        self._pending_fill: tuple[dict, Lot] | None = None
+        self._has_lot = False
         self._has_lot = False
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
@@ -177,8 +200,10 @@ class ResearchPanel(QFrame):
         title.setObjectName("cardTitle")
         self.subtitle = QLabel()
         self.subtitle.setObjectName("hint")
-        close = QPushButton("✕")
-        close.setObjectName("ghost")
+        close = QPushButton()
+        close.setObjectName("iconButton")
+        close.setAccessibleName(strings.RESEARCH_CLOSE_TIP)
+        theme.set_icon(close, "close")
         close.setToolTip(strings.RESEARCH_CLOSE_TIP)
         close.clicked.connect(self.closed)
         titles = QVBoxLayout()
@@ -189,7 +214,17 @@ class ResearchPanel(QFrame):
         header.addLayout(titles, 1)
         header.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
 
-        # Empty page: one button to start.
+        # Empty page: what research does and one button to start it
+        # (auto-fill is always in the toolbar below).
+        badge = QFrame()
+        badge.setObjectName("emptyIcon")
+        badge.setFixedSize(56, 56)
+        badge_icon = QLabel()
+        badge_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        theme.set_icon(badge_icon, "sparkle", "accent", QSize(26, 26))
+        QVBoxLayout(badge).addWidget(badge_icon)
+        empty_title = QLabel(strings.RESEARCH_EMPTY_TITLE)
+        empty_title.setObjectName("cardTitle")
         self.start_btn = QPushButton(strings.RESEARCH_START)
         self.start_btn.setObjectName("primary")
         self.start_btn.clicked.connect(self.research_lot)
@@ -199,10 +234,14 @@ class ResearchPanel(QFrame):
         start_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         empty = QWidget()
         empty_layout = QVBoxLayout(empty)
+        empty_layout.setContentsMargins(12, 0, 12, 0)
         empty_layout.addStretch(1)
-        empty_layout.addWidget(self.start_btn, 0, Qt.AlignmentFlag.AlignHCenter)
-        empty_layout.addSpacing(6)
+        empty_layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignHCenter)
+        empty_layout.addSpacing(8)
+        empty_layout.addWidget(empty_title, 0, Qt.AlignmentFlag.AlignHCenter)
         empty_layout.addWidget(start_hint)
+        empty_layout.addSpacing(10)
+        empty_layout.addWidget(self.start_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         empty_layout.addStretch(2)
 
         self.transcript = QTextBrowser()
@@ -215,6 +254,23 @@ class ResearchPanel(QFrame):
 
         self.status = QLabel()
         self.status.setObjectName("hint")
+
+        # Photos go along so Gemini can see the item; can be switched off.
+        self.photos_toggle = QCheckBox(strings.RESEARCH_INCLUDE_PHOTOS)
+        self.photos_toggle.setChecked(True)
+        self.photos_toggle.setToolTip(strings.RESEARCH_INCLUDE_PHOTOS_TIP)
+        self.photos_toggle.toggled.connect(
+            lambda on: setattr(self._chat, "include_photos", on)
+        )
+        self.autofill_btn = QPushButton(strings.AUTOFILL)
+        self.autofill_btn.setToolTip(strings.AUTOFILL_TIP)
+        theme.set_icon(self.autofill_btn, "sparkle")
+        self.autofill_btn.clicked.connect(self.autofill)
+        tools = QHBoxLayout()
+        tools.setSpacing(8)
+        tools.addWidget(self.photos_toggle)
+        tools.addStretch(1)
+        tools.addWidget(self.autofill_btn)
 
         self.question = QLineEdit()
         self.question.setPlaceholderText(strings.RESEARCH_ASK_PLACEHOLDER)
@@ -233,6 +289,7 @@ class ResearchPanel(QFrame):
         layout.addLayout(header)
         layout.addWidget(self.stack, 1)
         layout.addWidget(self.status)
+        layout.addLayout(tools)
         layout.addLayout(ask_row)
 
         self.reset(None)
@@ -244,7 +301,11 @@ class ResearchPanel(QFrame):
         if self._job is not None:
             self._job.stop()  # finishes on its own; its signals are ignored
             self._job = None
-        self._chat = ResearchChat()
+        self._pending_fill = None
+        self._chat = ResearchChat(
+            custom_fields=self._custom_fields,
+            include_photos=self.photos_toggle.isChecked(),
+        )
         self._turns = []
         self.transcript.clear()
         self.stack.setCurrentIndex(0)
@@ -258,6 +319,15 @@ class ResearchPanel(QFrame):
 
     def research_lot(self) -> None:
         self._ask(RESEARCH_REQUEST, label=strings.RESEARCH_TURN_LABEL)
+
+    def autofill(self) -> None:
+        """Ask Gemini for field values, then let the user review them."""
+        self._ask(AUTOFILL_REQUEST, label=strings.AUTOFILL_TURN_LABEL, fill=True)
+
+    def set_custom_fields(self, fields: list[CustomField]) -> None:
+        """Custom fields from Settings: sent with the lot and auto-filled."""
+        self._custom_fields = list(fields)
+        self._chat.custom_fields = list(fields)
 
     # -- asking -------------------------------------------------------------
 
@@ -275,18 +345,20 @@ class ResearchPanel(QFrame):
         else:
             self._ask_typed()
 
-    def _ask(self, question: str, label: str | None = None) -> None:
+    def _ask(self, question: str, label: str | None = None, *, fill=False) -> None:
         lot = self._lot_provider()
         if lot is None or self._job is not None:
             return
         turn = _Turn(question=label or question)
         self._turns.append(turn)
         self.stack.setCurrentIndex(1)
-        self.status.setText(strings.RESEARCH_THINKING)
+        self.status.setText(
+            strings.AUTOFILL_WORKING if fill else strings.RESEARCH_THINKING
+        )
         self._set_busy(True)
         self._render()
 
-        job = _Job(self._chat, question, lot)
+        job = _Job(self._chat, question, lot, autofill=fill)
         self._job = job
         mine = lambda: self._job is job
         # Signals come from the worker thread; queue them onto the UI thread.
@@ -294,6 +366,8 @@ class ResearchPanel(QFrame):
         job.text.connect(lambda t: mine() and self._on_text(turn, t), queued)
         job.status.connect(lambda s: mine() and self.status.setText(s), queued)
         job.done.connect(lambda src: mine() and self._on_done(turn, src), queued)
+        job.filled.connect(lambda v: mine() and self._on_filled(turn, v), queued)
+        job.photos.connect(lambda n: mine() and setattr(turn, "photos", int(n)), queued)
         job.refused.connect(
             lambda: mine() and self._on_notice(turn, strings.RESEARCH_REFUSED),
             queued,
@@ -324,6 +398,7 @@ class ResearchPanel(QFrame):
         self._set_busy(False)
         self._render()
         self.question.setFocus()
+        self._review_fill()
 
     def _set_busy(self, busy: bool) -> None:
         self.ask_btn.setText(strings.RESEARCH_STOP if busy else strings.RESEARCH_ASK)
@@ -332,6 +407,7 @@ class ResearchPanel(QFrame):
         self.ask_btn.style().polish(self.ask_btn)
         self.ask_btn.setEnabled(self._has_lot)
         self.start_btn.setEnabled(self._has_lot and not busy)
+        self.autofill_btn.setEnabled(self._has_lot and not busy)
 
     # -- rendering ----------------------------------------------------------
 
@@ -341,6 +417,8 @@ class ResearchPanel(QFrame):
         parts = []
         for turn in self._turns:
             parts.append(f"**{strings.RESEARCH_YOU}** {turn.question}")
+            if turn.photos:
+                parts.append(f"*{strings.RESEARCH_PHOTOS_SENT.format(n=turn.photos)}*")
             if turn.answer:
                 parts.append(turn.answer)
             if turn.notice:
@@ -354,3 +432,34 @@ class ResearchPanel(QFrame):
         self.transcript.setMarkdown("\n\n".join(parts[:-1]))
         if at_bottom:
             bar.setValue(bar.maximum())
+
+    # -- auto-fill ----------------------------------------------------------
+
+    def _on_filled(self, turn: _Turn, values: dict) -> None:
+        lot = self._lot_provider()
+        if not values or lot is None:
+            turn.answer = strings.AUTOFILL_NOTHING
+            return
+        turn.answer = strings.AUTOFILL_FOUND.format(
+            fields=", ".join(self._label(key) for key in values)
+        )
+        self._render()
+        # Shown once this turn has finished (see _on_finished).
+        self._pending_fill = (values, lot)
+
+    def _review_fill(self) -> None:
+        pending, self._pending_fill = self._pending_fill, None
+        if pending is None:
+            return
+        values, lot = pending
+        dialog = AutofillDialog(values, lot, self._custom_fields, self.window())
+        try:
+            if dialog.exec() and (chosen := dialog.selected()):
+                self.apply_requested.emit(chosen)
+        finally:
+            dialog.deleteLater()
+
+    def _label(self, key: str) -> str:
+        labels = {k: label for k, label, _hint in AUTOFILL_FIELDS}
+        labels |= {f.key: f.label for f in self._custom_fields}
+        return labels.get(key, key)

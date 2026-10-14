@@ -36,6 +36,8 @@ FIELD_LABELS = {
     "year": strings.YEAR,
     "make": strings.MAKE,
     "model": strings.MODEL,
+    "caliber": strings.CALIBER,
+    "gun_type": strings.GUN_TYPE,
     "owner": strings.OWNER,
     "book_no": strings.BOOK_NO,
 }

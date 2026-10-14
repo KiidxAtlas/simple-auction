@@ -154,6 +154,17 @@ def lot_data(lot):
 def validated_lot(data):
     if not isinstance(data, dict):
         raise TypeError("Invalid lot")
+    # Older shared database records predate these optional fields.
+    data = {
+        "barrel_length": "",
+        "caliber": "",
+        "gun_type": "",
+        "ca_legality": "N/A",
+        "c_and_r": False,
+        "title_fields": None,
+        "custom": {},
+        **data,
+    }
     fields = set(lot_data(Lot(1)))
     if (
         set(data) != fields
@@ -166,9 +177,18 @@ def validated_lot(data):
     if any(
         not isinstance(v, str) or len(v) > 100_000
         for k, v in data.items()
-        if k not in {"year", "lot_number"}
+        if k not in {"year", "lot_number", "title_fields", "custom", "c_and_r"}
     ):
         raise ValueError("Invalid lot text")
+    if data["ca_legality"] not in {"N/A", "Legal for CA", "Not CA legal"}:
+        raise ValueError("Invalid CA legality")
+    if type(data["c_and_r"]) is not bool:
+        raise ValueError("Invalid C&R flag")
+    from simple_auction.services.title_layout import validate, validate_values
+
+    if data["title_fields"] is not None:
+        validate(data["title_fields"])
+    data["custom"] = validate_values(data["custom"])
     return Lot(**data)
 
 

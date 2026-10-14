@@ -1,0 +1,12 @@
+title: 1. make- model -serial -number- caliber- c&r ca legal
+  2. add caliber for title
+
+description: 1. remove make model
+  2. add barrel length input for description
+
+conditional per gun type:
+  rifle:
+  Shotgun:
+  handgun:
+
+condition expansion: 1. finish, wood/metal quality.

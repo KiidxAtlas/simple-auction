@@ -19,3 +19,13 @@ class Lot:
     # the start of the title and description.
     make: str = ""
     model: str = ""
+    barrel_length: str = ""
+    caliber: str = ""
+    gun_type: str = ""  # Rifle, Shotgun, Handgun (or anything typed)
+    ca_legality: str = "N/A"
+    # Curio & Relic eligible (written into the title as "C&R ELIGIBLE").
+    c_and_r: bool = False
+    # Layout used to generate this saved title; None means the legacy layout.
+    title_fields: list[str] | None = None
+    # Values of the custom fields defined in Settings: {field id: text}.
+    custom: dict[str, str] = field(default_factory=dict)

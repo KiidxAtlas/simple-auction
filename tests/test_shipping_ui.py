@@ -70,6 +70,9 @@ def page(app, tmp_path):
     page = ShippingPage(folder)
     page.activate()
     page.show()
+    # Keyboard focus needs the active window; an earlier test's window may
+    # still hold it.
+    page.activateWindow()
     app.processEvents()
     yield page
     page._save_timer.stop()
@@ -295,19 +298,21 @@ def test_header_switch_preserves_catalogue_and_save_failure_stays_in_shipping(
         window.create_auction()
         window.form.title.setText("Preserve my lot")
         current = window.lot_no
-        window.shipping_button.click()
+        window.nav_shipping.click()
         assert window.pages.currentWidget() is window.shipping
         assert not window.splitter.isVisible()
         assert not window.form.is_dirty()
-        assert window.shipping_button.text() == "Back to Catalogue"
-        window.shipping_button.click()
+        assert window.nav_shipping.isChecked()
+        window.nav_catalogue.click()
         assert window.pages.currentWidget() is window.splitter
         assert window.lot_no == current
         assert window.form.title.text() == "Preserve my lot"
-        window.shipping_button.click()
+        window.nav_shipping.click()
         monkeypatch.setattr(window.shipping, "flush", lambda **kw: False)
-        window.shipping_button.click()
+        window.nav_catalogue.click()
         assert window.pages.currentWidget() is window.shipping
+        # The highlighted tab follows the workspace that actually stayed open.
+        assert window.nav_shipping.isChecked()
         assert not window.close()
     finally:
         monkeypatch.setattr(window.shipping, "flush", lambda **kw: True)
@@ -325,8 +330,9 @@ def test_failed_catalogue_save_prevents_header_switch(app, tmp_path, monkeypatch
     )
     try:
         monkeypatch.setattr(window, "_leave_lot", lambda: False)
-        window.shipping_button.click()
+        window.nav_shipping.click()
         assert window.pages.currentWidget() is window.splitter
+        assert window.nav_catalogue.isChecked()
     finally:
         window.close()
         window.deleteLater()

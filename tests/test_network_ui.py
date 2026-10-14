@@ -174,7 +174,7 @@ def test_shipping_ui_merges_updates_and_recovers_failed_download(
 
 def test_settings_host_toggle_and_real_pairing_test(app, host, tmp_path):
     dialog = SettingsDialog(Config(base_dir=tmp_path), [])
-    dialog.tabs.setCurrentIndex(1)
+    dialog.show_section("Sharing")
     dialog.show()
     app.processEvents()
     widget = dialog.network

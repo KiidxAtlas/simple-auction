@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     QFile,
     QFileSystemWatcher,
     QSettings,
+    QSize,
     Qt,
     QThread,
     QTimer,
@@ -18,7 +19,9 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -60,6 +63,7 @@ from simple_auction.ui.network_poll import NetworkPoll
 from simple_auction.ui.settings import SettingsDialog
 from simple_auction.ui.shipping_page import ShippingPage
 from simple_auction.ui.source_update_dialog import SourceCheckThread, SourceUpdateDialog
+from simple_auction.ui.toast import Toast
 from simple_auction.ui.update_dialog import (
     UpdateCheckThread,
     UpdateDialog,
@@ -68,7 +72,6 @@ from simple_auction.ui.update_dialog import (
 
 log = logging.getLogger(__name__)
 
-STATUS_MS = 4000
 STARTUP_UPDATE_DELAY_MS = 1500
 
 
@@ -91,12 +94,17 @@ class MainPage(QMainWindow):
 
         self.setWindowTitle(APP_NAME)
         self.resize(*theme.WINDOW_SIZE)
+        self.setMinimumSize(*theme.WINDOW_MIN_SIZE)
 
         self.sidebar = LotSidebar()
         self.form = LotForm()
         self.form.set_serial_links(config.serial_links)
         self.form.set_conditions(config.conditions)
+        self.form.set_custom_fields(config.custom_fields)
+        self.form.set_title_fields(config.title_fields)
+        self.form.set_desc_fields(config.desc_fields)
         self.research = ResearchPanel(self.form.current_lot)
+        self.research.set_custom_fields(config.custom_fields)
         self.research.hide()
 
         # Drag the edges between the panels to resize them; sizes are remembered.
@@ -122,31 +130,10 @@ class MainPage(QMainWindow):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
-        header = QWidget()
-        header.setObjectName("workspaceHeader")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(16, 10, 16, 10)
-        self.workspace_title = QLabel(strings.CATALOGUE_WORKSPACE)
-        self.workspace_title.setObjectName("appName")
-        header_layout.addWidget(self.workspace_title)
-        header_layout.addStretch()
-        settings_button = QPushButton(strings.SETTINGS_BTN)
-        settings_button.clicked.connect(self.open_settings)
-        header_layout.addWidget(settings_button)
-        self.network_status = QLabel()
-        self.network_status.setObjectName("hint")
-        header_layout.addWidget(self.network_status)
-        self.reload_shared_button = QPushButton("Reload from host")
-        self.reload_shared_button.clicked.connect(self.reload_shared)
-        header_layout.addWidget(self.reload_shared_button)
-        self.shipping_button = QPushButton(strings.SHIPPING_NAV)
-        self.shipping_button.setObjectName("primary")
-        self.shipping_button.clicked.connect(self.toggle_workspace)
-        header_layout.addWidget(self.shipping_button)
-        content_layout.addWidget(header)
+        content_layout.addWidget(self._build_header())
         content_layout.addWidget(self.pages, 1)
         self.setCentralWidget(content)
-        self.statusBar().setSizeGripEnabled(False)
+        self.toast = Toast(content)
 
         self._autosave = QTimer(self)
         self._autosave.setSingleShot(True)
@@ -157,15 +144,19 @@ class MainPage(QMainWindow):
         self.sidebar.lot_selected.connect(self.open_lot)
         self.sidebar.export_auction.connect(self.export_auction)
         self.sidebar.delete_requested.connect(self.delete_items)
-        self.sidebar.settings_requested.connect(self.open_settings)
         self.sidebar.import_requested.connect(self.import_auctions)
         self.form.changed.connect(lambda: self._autosave.start(AUTOSAVE_MS))
         self.form.save_now.connect(self.flush)
         self.form.export_requested.connect(self.export_current)
         self.form.new_auction_requested.connect(self.create_auction)
+        self.form.new_lot_requested.connect(self._new_lot_in_current_auction)
+        self.form.import_requested.connect(self.import_auctions)
+        self.form.delete_requested.connect(self.delete_current)
+        self.form.step_requested.connect(self.step_lot)
         self.form.serial_lookup_requested.connect(self.lookup_serial)
         self.form.research_toggled.connect(self.research.setVisible)
         self.research.closed.connect(self._close_research)
+        self.research.apply_requested.connect(self.form.apply_autofill)
 
         # The installed (Windows) app updates from release installers; a copy
         # run from a git checkout (e.g. on a Mac) updates by pulling commits.
@@ -198,17 +189,75 @@ class MainPage(QMainWindow):
         self._configure_sharing()
         self.refresh()
 
-    def toggle_workspace(self) -> None:
-        if self.pages.currentWidget() is self.splitter:
-            if not self._leave_lot() or not self.shipping.activate():
-                return
-            self.pages.setCurrentWidget(self.shipping)
-            self.shipping_button.setText(strings.CATALOGUE_NAV)
-            self.workspace_title.setText(strings.SHIPPING_WORKSPACE)
-        elif self.shipping.flush():
+    def _build_header(self) -> QWidget:
+        """App name and Catalogue/Shipping switch; status and Settings at right."""
+        header = QWidget()
+        header.setObjectName("workspaceHeader")
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(14, 8, 12, 8)
+        layout.setSpacing(10)
+        brand = QLabel()
+        brand.setObjectName("brandMark")
+        brand.setFixedSize(28, 28)
+        brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        theme.set_icon(brand, "gavel", "accent_text", QSize(16, 16))
+        layout.addWidget(brand)
+        app_name = QLabel(strings.APP_TITLE)
+        app_name.setObjectName("appName")
+        layout.addWidget(app_name)
+        layout.addSpacing(18)
+        segmented = QFrame()
+        segmented.setObjectName("segmented")
+        segments = QHBoxLayout(segmented)
+        segments.setContentsMargins(3, 3, 3, 3)
+        segments.setSpacing(2)
+        self.nav = QButtonGroup(self)
+        self.nav_catalogue = QPushButton(strings.CATALOGUE_NAV)
+        self.nav_shipping = QPushButton(strings.SHIPPING_NAV)
+        for button, icon in ((self.nav_catalogue, "book"), (self.nav_shipping, "box")):
+            button.setCheckable(True)
+            theme.set_icon(button, icon)
+            self.nav.addButton(button)
+            segments.addWidget(button)
+        self.nav_catalogue.setChecked(True)
+        self.nav_catalogue.clicked.connect(lambda: self.show_workspace(shipping=False))
+        self.nav_shipping.clicked.connect(lambda: self.show_workspace(shipping=True))
+        layout.addWidget(segmented)
+        layout.addStretch()
+        self.update_button = QPushButton()
+        self.update_button.setObjectName("link")
+        self.update_button.setToolTip(strings.SOURCE_UPDATES_WAITING_TIP)
+        theme.set_icon(self.update_button, "update", "accent")
+        self.update_button.clicked.connect(self.check_for_updates)
+        self.update_button.hide()
+        layout.addWidget(self.update_button)
+        self.network_status = QLabel()
+        self.network_status.setObjectName("chip")
+        layout.addWidget(self.network_status)
+        self.reload_shared_button = QPushButton(strings.RELOAD_SHARED)
+        theme.set_icon(self.reload_shared_button, "refresh")
+        self.reload_shared_button.clicked.connect(self.reload_shared)
+        layout.addWidget(self.reload_shared_button)
+        settings_button = QPushButton(strings.SETTINGS_BTN)
+        theme.set_icon(settings_button, "settings")
+        settings_button.clicked.connect(self.open_settings)
+        layout.addWidget(settings_button)
+        return header
+
+    def show_workspace(self, *, shipping: bool) -> None:
+        """Switch between catalogue and shipping, saving what's open first."""
+        if shipping and self.pages.currentWidget() is self.splitter:
+            if self._leave_lot() and self.shipping.activate():
+                self.pages.setCurrentWidget(self.shipping)
+        elif (
+            not shipping
+            and self.pages.currentWidget() is self.shipping
+            and self.shipping.flush()
+        ):
             self.pages.setCurrentWidget(self.splitter)
-            self.shipping_button.setText(strings.SHIPPING_NAV)
-            self.workspace_title.setText(strings.CATALOGUE_WORKSPACE)
+        # A refused switch leaves the highlighted tab on the current workspace.
+        on_shipping = self.pages.currentWidget() is self.shipping
+        (self.nav_shipping if on_shipping else self.nav_catalogue).setChecked(True)
 
     # -- data ---------------------------------------------------------------
 
@@ -251,7 +300,7 @@ class MainPage(QMainWindow):
                 )
                 self._apply_snapshot(snapshot)
             except network.NetworkError as e:
-                self.network_status.setText("Disconnected")
+                self._net_status("Disconnected")
                 self.network_status.setToolTip(str(e))
             return
         folder = self.config.auctions_dir
@@ -272,6 +321,7 @@ class MainPage(QMainWindow):
 
         auctions, errors = self._io(strings.IO_LOADING, load_all)
         self.sidebar.populate(auctions)
+        self._update_navigation()
         for no, error in errors:
             self._read_error(no, error)
 
@@ -296,7 +346,12 @@ class MainPage(QMainWindow):
             QMessageBox.warning(self, strings.DELETE, str(e))
 
     def _status(self, text: str) -> None:
-        self.statusBar().showMessage(text, STATUS_MS)
+        self.toast.show_message(text)
+
+    def _net_status(self, text: str, *, ok: bool = False) -> None:
+        """The sharing chip in the top bar: accent when fine, amber otherwise."""
+        self.network_status.setText(text)
+        theme.repolish(self.network_status, state="ok" if ok else "warning")
 
     def _locked_warning(self) -> None:
         QMessageBox.warning(self, strings.EXCEL_LOCKED_TITLE, strings.EXCEL_LOCKED_BODY)
@@ -332,6 +387,26 @@ class MainPage(QMainWindow):
                 self._shared_base = record
         self.auction_no, self.lot_no = auction_no, lot.lot_number
         self.form.load(lot, auction_no)
+        self._update_navigation()
+
+    def _update_navigation(self) -> None:
+        if self.auction_no is None or self.lot_no is None:
+            return
+        self.form.set_navigation(
+            self.sidebar.neighbor(self.auction_no, self.lot_no, -1) is not None,
+            self.sidebar.neighbor(self.auction_no, self.lot_no, 1) is not None,
+        )
+
+    def step_lot(self, step: int) -> None:
+        """Open the previous (-1) or next (+1) lot in the same auction."""
+        if self.auction_no is None or self.lot_no is None:
+            return
+        target = self.sidebar.neighbor(self.auction_no, self.lot_no, step)
+        if target is not None:
+            auction_no = self.auction_no
+            self.open_lot(auction_no, target)
+            if self.lot_no == target:
+                self.sidebar.select(auction_no, target)
 
     def _clear(self) -> None:
         self._autosave.stop()
@@ -344,6 +419,10 @@ class MainPage(QMainWindow):
         self.research.hide()
         self.form.set_research_checked(False)
 
+    def _new_lot_in_current_auction(self) -> None:
+        if self.auction_no is not None:
+            self.create_lot(self.auction_no)
+
     # -- autosave -----------------------------------------------------------
 
     def flush(self) -> bool:
@@ -355,7 +434,9 @@ class MainPage(QMainWindow):
         if self.auction_no is None or not self.form.is_dirty():
             return True
         auction_no = self.auction_no
-        lot = listing.apply_condition(self.form.collect(), self.config.conditions)
+        lot = listing.apply_condition(
+            self.form.collect(), self.config.conditions, include_title=False
+        )
         path = self._path(auction_no)
         details, images = self._details(auction_no), self._images_dir(auction_no)
         try:
@@ -391,7 +472,7 @@ class MainPage(QMainWindow):
         if photos != lot.photos:
             self.form.set_photos(photos)
         self.form.mark_saved()
-        self.sidebar.update_title(auction_no, lot.lot_number, lot.title)
+        self.sidebar.update_lot(auction_no, lot)
         self._recycle(removed, images)
         return True
 
@@ -452,11 +533,12 @@ class MainPage(QMainWindow):
 
     def _on_startup_source_checked(self, status, _error: str) -> None:
         if status is not None and status.behind:
-            self.statusBar().showMessage(
+            self.update_button.setText(
                 strings.SOURCE_UPDATES_WAITING.format(
                     changes=strings.count(status.behind, "update")
                 )
             )
+            self.update_button.show()
 
     def _on_startup_update_checked(self, info, _error: str = "") -> None:
         if self._io_busy:
@@ -697,6 +779,10 @@ class MainPage(QMainWindow):
         if self.auction_no is not None:
             self.export_auction(self.auction_no)
 
+    def delete_current(self) -> None:
+        if self.auction_no is not None and self.lot_no is not None:
+            self.delete_items([(self.auction_no, self.lot_no)])
+
     def export_auction(self, auction_no: int) -> None:
         if not self._leave_lot():
             return
@@ -920,6 +1006,9 @@ class MainPage(QMainWindow):
             chosen = dialog.next_auction()
             self.config.start_at = None if chosen == from_files else chosen
             self.config.serial_links = dialog.serial_links()
+            self.config.custom_fields = dialog.custom_fields()
+            self.config.title_fields = dialog.title_fields()
+            self.config.desc_fields = dialog.desc_fields()
             conditions = dialog.conditions()
             if conditions != dialog.original_conditions():
                 # Only rewrite the file when the table changed, so comments
@@ -935,6 +1024,10 @@ class MainPage(QMainWindow):
             self._watch_conditions()
             self.form.set_serial_links(self.config.serial_links)
             self.form.set_conditions(self.config.conditions)
+            self.form.set_custom_fields(self.config.custom_fields)
+            self.research.set_custom_fields(self.config.custom_fields)
+            self.form.set_title_fields(self.config.title_fields)
+            self.form.set_desc_fields(self.config.desc_fields)
             if key := dialog.new_api_key():
                 api_key.save(key)
                 research.forget_search_check()
@@ -1083,13 +1176,11 @@ class MainPage(QMainWindow):
             catalogue.CatalogueReadError,
         ) as e:
             self.shipping.set_connection(self.client, True)
-            self.network_status.setText("Disconnected · check Settings")
+            self._net_status("Disconnected · check Settings")
             self.network_status.setToolTip(str(e))
             self.sidebar.populate({})
             if settings.mode == "join" and isinstance(e, network.Unavailable):
-                self.network_status.setText(
-                    "Waiting for host · reconnecting automatically"
-                )
+                self._net_status("Waiting for host · reconnecting automatically")
                 self._sharing_signature = signature
             else:
                 QMessageBox.warning(self, "Local network sharing", str(e))
@@ -1136,6 +1227,7 @@ class MainPage(QMainWindow):
                 for a, lots in snapshot["auctions"].items()
             }
             self.sidebar.populate(auctions)
+            self._update_navigation()
             if self.auction_no is not None and self.lot_no is not None:
                 self.sidebar.select(self.auction_no, self.lot_no)
         state = (
@@ -1143,13 +1235,14 @@ class MainPage(QMainWindow):
             if isinstance(self.client, network.LocalClient)
             else ("Hosting" if self.host else "Connected")
         )
-        self.network_status.setText(
+        self._net_status(
             state
             + (
                 " · unsaved changes"
                 if self.form.is_dirty() or self.shipping.dirty
                 else " · synced"
-            )
+            ),
+            ok=True,
         )
         self.network_status.setToolTip(
             "The host shares auctions, photos, and shipping. Keep it awake and allow Simple Auction through the private-network firewall."
@@ -1195,7 +1288,7 @@ class MainPage(QMainWindow):
                     self.client.address = worker.connection.address
                     self.client.identity = worker.connection.identity
             if worker.error:
-                self.network_status.setText("Reconnecting automatically · edits kept")
+                self._net_status("Reconnecting automatically · edits kept")
                 self.network_status.setToolTip(str(worker.error))
                 return
             snapshot, batch, record, lot = worker.result
@@ -1215,7 +1308,7 @@ class MainPage(QMainWindow):
                 and worker.current_key == (self.auction_no, self.lot_no)
                 and record != self._shared_base
             ):
-                self.network_status.setText("Lot changed on host · your edits kept")
+                self._net_status("Lot changed on host · your edits kept")
             if worker.shipping_key == self.shipping.path:
                 self.shipping.sync_snapshot(snapshot["shipping"], batch)
         finally:

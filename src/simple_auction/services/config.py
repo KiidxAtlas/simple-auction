@@ -17,6 +17,17 @@ from simple_auction.services import conditions, serial_links, storage
 from simple_auction.services.conditions import ConditionOption, ConditionsFileError
 from simple_auction.services.network import Sharing
 from simple_auction.services.serial_links import SerialLink
+from simple_auction.services.title_layout import (
+    DEFAULT_DESC_FIELDS,
+    DEFAULT_FIELDS,
+    LEGACY_DEFAULT_FIELDS,
+    PREVIOUS_DEFAULT_FIELDS,
+    CustomField,
+    custom_fields_from_json,
+    custom_fields_to_json,
+    validate,
+    validate_desc,
+)
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +67,11 @@ class Config:
     # None keeps the OS theme for settings created before the manual toggle.
     dark_mode: bool | None = None
     sharing: Sharing = field(default_factory=Sharing)
+    title_fields: list[str] = field(default_factory=lambda: list(DEFAULT_FIELDS))
+    # Fields written as "Label: value" lines at the top of the description.
+    desc_fields: list[str] = field(default_factory=lambda: list(DEFAULT_DESC_FIELDS))
+    # Fields added in Settings → Listing fields (values are kept per lot).
+    custom_fields: list[CustomField] = field(default_factory=list)
 
     @property
     def auctions_dir(self) -> Path:
@@ -105,6 +121,12 @@ class Config:
             raise ValueError("invalid auction numbering settings")
         sharing = Sharing(**data.get("sharing", {}))
         sharing.validate()
+        custom = custom_fields_from_json(data.get("custom_fields"))
+        title_fields = validate(data.get("title_fields", list(DEFAULT_FIELDS)), custom)
+        # Earlier built-in defaults become the current one; a layout the user
+        # changed is kept as it is.
+        if title_fields in (list(LEGACY_DEFAULT_FIELDS), list(PREVIOUS_DEFAULT_FIELDS)):
+            title_fields = list(DEFAULT_FIELDS)
         config = cls(
             base_dir=Path(base),
             photos_dir=Path(photos),
@@ -113,6 +135,11 @@ class Config:
             serial_links=serial_links.from_json(data.get("serial_links")),
             dark_mode=dark_mode,
             sharing=sharing,
+            title_fields=title_fields,
+            desc_fields=validate_desc(
+                data.get("desc_fields", list(DEFAULT_DESC_FIELDS)), custom
+            ),
+            custom_fields=custom,
         )
         return config, data
 
@@ -143,6 +170,9 @@ class Config:
             "serial_links": serial_links.to_json(self.serial_links),
             "dark_mode": self.dark_mode,
             "sharing": vars(self.sharing),
+            "title_fields": self.title_fields,
+            "desc_fields": self.desc_fields,
+            "custom_fields": custom_fields_to_json(self.custom_fields),
         }
         return json.dumps(data, indent=2).encode("utf-8")
 

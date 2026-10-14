@@ -1,24 +1,36 @@
 APP_TITLE = "Simple Auction"
 
 # Sidebar
-CREATE_NEW = "+  New Auction"
+CREATE_NEW = "New auction"
 CREATE_NEW_TIP = "Start the next auction (+1000) with its first lot"
 AUCTIONS_SECTION = "AUCTIONS"
 AUCTION_ROW = "Auction {n}"
 UNTITLED = "Untitled"
 SETTINGS = "Settings"
-SETTINGS_BTN = "⚙   Settings"
+SETTINGS_BTN = "Settings"
 ADD_LOT_TIP = "Add a lot to this auction"
 NEW_LOT = "New lot"
-EXPORT_AUCTION = "Export..."
+NEW_LOT_TIP = "Add the next lot to this auction (Ctrl+N)"
+EXPORT_AUCTION = "Export to Excel…"
 DELETE = "Delete"
 DELETE_N = "Delete {n} items"
+SIDEBAR_SEARCH = "Search lots"
+SIDEBAR_NO_MATCH = "No lots match your search."
+SIDEBAR_EMPTY = "No auctions yet. Create one to start cataloguing."
+INCOMPLETE_TIP = "Still needs: {fields}"
 
 # Lot editor
 LOT_HEADING = "Lot #{n}"
 LOT_SUBTITLE = "Auction {n}"
+LOT_BREADCRUMB = "Auction {auction}  ›  Lot {lot}"
+UNTITLED_LOT = "Untitled lot"
+PREV_LOT_TIP = "Previous lot (Ctrl+Page Up)"
+NEXT_LOT_TIP = "Next lot (Ctrl+Page Down)"
+MORE_TIP = "More actions"
 EXPORT = "Export"
 EXPORT_TIP = "Save a copy of this auction's Excel file"
+EXPORT_AUCTION_N = "Export auction {n} to Excel…"
+DELETE_LOT = "Delete this lot…"
 SAVE = "Save"
 ALL_SAVED = "✓ All changes saved"
 SAVING = "Saving…"
@@ -31,9 +43,11 @@ UNSAVED_BODY = (
 )
 QUIT_ANYWAY = "Quit without saving"
 
-ITEM_CARD = "Item"
+IDENTIFICATION_CARD = "Identification"
+LISTING_CARD = "Listing"
 CONSIGNMENT_CARD = "Consignment"
 PHOTOS_CARD = "Photos"
+CUSTOM_FIELDS_CARD = "More details"
 
 SERIAL = "Serial #"
 YEAR = "Year"
@@ -43,6 +57,11 @@ TITLE = "Title"
 DESC = "Description"
 OWNER = "Owner"
 BOOK_NO = "Book #"
+BARREL_LENGTH = "Barrel length"
+CA_LEGALITY = "CA legality"
+C_AND_R = "C&&R"  # "&&" shows a literal "&" in a Qt label
+C_AND_R_CHECK = "C&&R eligible"
+C_AND_R_TIP = 'Curio & Relic eligible. Adds "C&R ELIGIBLE" to the title.'
 
 SERIAL_PLACEHOLDER = "Serial number"
 MAKE = "Make"
@@ -50,8 +69,23 @@ MODEL = "Model"
 MAKE_PLACEHOLDER = "e.g. Remington"
 MODEL_PLACEHOLDER = "e.g. 870 Wingmaster"
 YEAR_PLACEHOLDER = "e.g. 1965"
+BARREL_PLACEHOLDER = "e.g. 18 inches"
+CALIBER = "Caliber"
+CALIBER_PLACEHOLDER = "e.g. 7.62x39"
+GUN_TYPE = "Type"
+GUN_TYPE_PLACEHOLDER = "Rifle, Shotgun or Handgun"
+NONE_CHOICE = "None"  # the blank choice in a dropdown list
 TITLE_PLACEHOLDER = "Short listing title"
 TITLE_TRIMMED = "Too long: the end of the title will be cut to fit the condition."
+AUTO_BADGE = "Auto-filled"
+TITLE_AUTO_TIP = (
+    "Built from the fields chosen in Settings → Listing fields. "
+    "You can add your own wording too."
+)
+DESC_AUTO_TIP = (
+    "The field lines chosen in Settings → Listing fields and the condition "
+    "sentence are kept up to date automatically."
+)
 DESC_PLACEHOLDER = "Description shown to bidders"
 OWNER_PLACEHOLDER = "Consignor name"
 BOOK_PLACEHOLDER = "Book number"
@@ -60,13 +94,16 @@ LOOKUP_FOUND = "✓ Serial table: {title}, made {year}"
 LOOKUP_SEVERAL = "Several matches, pick the right year: {matches}"
 LOOKUP_NONE = "No match in the serial table."
 LOOKUP_TABLE_ERROR = "The serial table has an error: {error}"
-SERIAL_LINK = "{name} ↗"
+SERIAL_LINK = "{name}"
 SERIAL_LINK_TIP = "Open {name} with this serial filled in"
+SERIAL_LINK_NEEDS_SERIAL = "Enter a serial number to look it up on {name}"
+LOOK_UP_ON = "Look up on:"
 
-ADD_PHOTOS = "Add photos"
+ADD_PHOTOS = "Add photos…"
 PICK_PHOTOS = "Choose photos"
-NO_PHOTOS = "No photos yet."
-PHOTOS_HINT = "Select a photo and press Delete to remove it."
+NO_PHOTOS = "Drop photos here, or use Add photos."
+PHOTOS_DROP_HINT = "JPEG, PNG, HEIC or WebP"
+PHOTOS_HINT = "Drop more photos here. Select one and press Delete to remove it."
 
 # Research panel
 RESEARCH = "Research"
@@ -74,11 +111,37 @@ RESEARCH_TIP = "Research this gun with Gemini and Google Search"
 RESEARCH_CLOSE_TIP = "Close research"
 RESEARCH_SUBTITLE = "Lot #{n}"
 RESEARCH_START = "Research this lot"
+RESEARCH_EMPTY_TITLE = "Look up this gun"
 RESEARCH_START_HINT = (
-    "Uses the title, serial, year, condition and description. "
-    "Owner and book # are not sent."
+    "Uses the lot's details and, unless switched off below, up to 6 of its "
+    "photos. Owner and book # are not sent."
 )
 RESEARCH_TURN_LABEL = "Research this lot"
+RESEARCH_INCLUDE_PHOTOS = "Send photos"
+RESEARCH_INCLUDE_PHOTOS_TIP = (
+    "Let Gemini see up to 6 of the lot's photos (sent again only when they change)"
+)
+RESEARCH_PHOTOS_SENT = "{n} photo(s) sent."
+AUTOFILL = "Auto-fill fields"
+AUTOFILL_TIP = (
+    "Let Gemini suggest make, model, year, serial, barrel length and your own "
+    "fields from the details, photos and research. You review them first."
+)
+AUTOFILL_TURN_LABEL = "Auto-fill this lot's fields"
+AUTOFILL_WORKING = "Finding values for the fields…"
+AUTOFILL_FOUND = (
+    "Suggested values for: {fields}. Review them in the window that opened."
+)
+AUTOFILL_NOTHING = "No field values could be found for this lot."
+AUTOFILL_TITLE = "Auto-fill fields"
+AUTOFILL_INTRO = (
+    "Ticked suggestions go into the lot when you click Fill. Check them "
+    "against the item: they come from Gemini and may be wrong. You can edit "
+    "a suggestion before filling it in."
+)
+AUTOFILL_REPLACES = "Replaces: {value}"
+AUTOFILL_SAME = "Already filled in with this value."
+AUTOFILL_APPLY = "Fill selected"
 RESEARCH_ASK_PLACEHOLDER = "Ask about this gun…"
 RESEARCH_ASK = "Ask"
 RESEARCH_STOP = "Stop"
@@ -114,30 +177,78 @@ RESEARCH_API_ERROR = "The research request failed: {error}"
 RESEARCH_FAILED = "Research failed, see the log."
 
 EMPTY_TITLE = "No lot selected"
-EMPTY_BODY = "Pick a lot in the sidebar, or start a new auction."
+EMPTY_BODY = (
+    "Pick a lot in the sidebar, start a new auction, or import an old spreadsheet."
+)
+EMPTY_IMPORT = "Import from Excel…"
 
 # Settings
+SETTINGS_FOOTER_HINT = "Changes take effect when you click Save."
+SETTINGS_AUCTION_ABOUT = (
+    "How new auctions are numbered and where serial numbers are looked up."
+)
+SETTINGS_CONDITIONS_ABOUT = "The choices in each lot's Condition dropdown and the sentence each one adds to the description."
+SETTINGS_LISTING_ABOUT = (
+    "Choose which details go into each lot's title and description, put them "
+    "in order, and add fields of your own."
+)
+SETTINGS_APPEARANCE_ABOUT = "How Simple Auction looks."
+SETTINGS_SHARING_ABOUT = "Work on the same auctions from two computers on your network."
+SETTINGS_FOLDERS_ABOUT = "Where auctions, data and photos are stored."
+SETTINGS_RESEARCH_ABOUT = "Lot research with Google Gemini."
 PICK_FOLDER = "Choose main folder"
-AUCTIONS_FOLDER = "Main folder:"
-BROWSE = "Browse..."
-PHOTOS_FOLDER = "Photos folder:"
+AUCTIONS_FOLDER = "Main folder"
+MAIN_FOLDER_HINT = "Auction workbooks, conditions and shipping files are kept here."
+BROWSE = "Browse…"
+SHOW_FOLDER = "Open"
+SHOW_FOLDER_TIP = "Show this folder in Explorer / Finder"
+PHOTOS_FOLDER = "Photos folder"
+PHOTOS_FOLDER_HINT = "Each auction's photos go in a subfolder named after it."
+FOLDERS_SECTION = "Storage locations"
+NUMBERING_SECTION = "Auction numbering"
 NEXT_AUCTION = "Next auction number:"
+NEXT_AUCTION_HINT = (
+    "New auction creates this auction next; the following ones count up from it."
+)
 PICK_PHOTOS_FOLDER = "Choose photos folder"
 SERIAL_TABLE = "Serial number table:"
 SERIAL_LINKS = "Serial number links:"
+SERIAL_LOOKUP_SECTION = "Serial number lookup sites"
+SERIAL_LOOKUP_ABOUT = "Each site becomes a button under a lot's Serial # field that opens the site with the serial filled in."
+SERIAL_TABLE_ABOUT = (
+    "Serials are also checked against your own serial table to fill in the year."
+)
 LINK_NAME = "Name"
+LINK_NAME_PLACEHOLDER = "e.g. Lindcott Armory"
 LINK_URL = "Link"
-ADD_LINK = "Add"
+LINKS_EMPTY = "Select a site to edit it, or click Add site."
+ADD_LINK = "Add site"
 REMOVE_LINK = "Remove"
-API_KEY = "Gemini API key:"
-API_KEY_PLACEHOLDER = "Paste your key from aistudio.google.com/apikey"
-API_KEY_SAVED = "Saved securely. Paste a new key to replace it."
+RESEARCH_SECTION = "Gemini API key"
+RESEARCH_ABOUT = "Research needs your own free Gemini API key. It is stored in the system keychain, never in a file."
+API_KEY = "API key"
+API_KEY_PLACEHOLDER = "Paste your key here"
+API_KEY_SAVED_PLACEHOLDER = "Paste a new key to replace the saved one"
+API_KEY_SAVED = "✓ A key is saved."
+API_KEY_NONE = "No key saved yet."
+SHOW_KEY = "Show"
+HIDE_KEY = "Hide"
+GET_API_KEY = "Get a free key at aistudio.google.com"
+GET_API_KEY_URL = "https://aistudio.google.com/apikey"
 FORGET_KEY = "Remove key"
 CONDITIONS = "Conditions:"
+CONDITIONS_SECTION = "Condition choices"
 CONDITION_NAME = "Name"
+CONDITION_NAME_HINT = "e.g. Very good"
 CONDITION_NOTE = "Text added to the description"
-CONDITIONS_HINT = "Order here is the order in the dropdown."
-OPEN_CONDITIONS_FILE = "Open file…"
+CONDITION_NOTE_PLACEHOLDER = (
+    "The sentence added to a lot's description when this condition is picked."
+)
+CONDITIONS_EMPTY = "Select a condition to edit it, or click Add condition."
+ADD_CONDITION = "Add condition"
+CONDITIONS_HINT = "The order here is the order in the dropdown. Drag a condition or use the arrows to move it."
+CONDITIONS_FILE_ABOUT = "Conditions are stored in conditions.yaml, which you can also edit in a text editor."
+OPEN_CONDITIONS_FILE = "Open conditions.yaml"
 OPEN_CONDITIONS_FILE_TIP = "Edit data/conditions.yaml in a text editor"
 CONDITIONS_RELOADED = "Conditions updated from conditions.yaml"
 CONDITIONS_FILE_ERROR_TITLE = "Problem in conditions.yaml"
@@ -145,11 +256,63 @@ CONDITIONS_FILE_ERROR = (
     "{error}\n\nThe previous conditions are still in use. Fix the file and "
     "save it again."
 )
-MOVE_UP = "↑"
-MOVE_DOWN = "↓"
-LINKS_HINT = "Use {serial}, {make} and {title} in the link."
-EDIT_SERIAL_TABLE = "Edit serial table..."
-
+LISTING_PREVIEW_SECTION = "Example"
+LISTING_PREVIEW_HINT = (
+    "How a lot's title and description come out with these settings. Empty "
+    "fields and N/A are always left out. Changes apply to the open lot and "
+    "future edits, not to lots already saved."
+)
+LISTING_PREVIEW_TITLE = "Title"
+LISTING_PREVIEW_DESC = "Description"
+LISTING_PREVIEW_DESC_TEXT = "Your own description text stays here."
+LISTING_PREVIEW_CONDITION = "The condition sentence is added at the end."
+LISTING_PREVIEW_VALUE = "your {label}"
+LISTING_ARRANGE_SECTION = "What goes where"
+LISTING_ARRANGE_HINT = (
+    "Tick a field to include it. Drag fields, or select one and use the "
+    "arrows, to set the order. A field can go in the title, the description, "
+    "both or neither."
+)
+LISTING_TITLE_COLUMN = "Title"
+LISTING_TITLE_HINT = (
+    "Fields above “Your own wording” go before it; fields below go after it, "
+    "after a dash."
+)
+LISTING_DESC_COLUMN = "Description"
+LISTING_DESC_HINT = "Each ticked field becomes a line like “Make: Colt” at the top."
+LISTING_OWN_WORDING = "Your own wording"
+TITLE_FIELDS_CUSTOM_TIP = "Where the words you type in the Title box go"
+FIELD_ORDER_HINT = "Drag, or select a field and use the arrows."
+FIELD_MOVE_UP = "Move field up"
+FIELD_MOVE_DOWN = "Move field down"
+CUSTOM_FIELDS_SECTION = "Your own fields"
+CUSTOM_FIELDS_HINT = (
+    "Add details such as Caliber or Finish. Each one gets a box in the lot "
+    "editor's More details card, and appears in the lists above so you can "
+    "place it in the title or description."
+)
+CUSTOM_FIELDS_EMPTY = "Select a field to edit it, or click Add field."
+ADD_CUSTOM_FIELD = "Add field"
+CUSTOM_FIELD_NAME = "Name"
+CUSTOM_FIELD_NAME_PLACEHOLDER = "e.g. Caliber"
+CUSTOM_FIELD_NAME_HINT = (
+    "Shown above its box in the lot editor and as the label in the description."
+)
+CUSTOM_FIELD_PREFIX = "Text before the value in the title (optional)"
+CUSTOM_FIELD_PREFIX_PLACEHOLDER = "e.g. Cal:"
+CUSTOM_FIELD_PREFIX_HINT = (
+    "With “Cal:”, a lot with .45 ACP gets “Cal: .45 ACP” in its title. "
+    "Leave empty to add just the value."
+)
+CUSTOM_FIELD_IN_LIST = "{label}  ·  your field"
+THEME_SECTION = "Theme"
+THEME_SYSTEM = "Match system"
+THEME_LIGHT = "Light"
+THEME_DARK = "Dark"
+THEME_HINT = "Match system switches between light and dark along with your computer."
+LINKS_HINT = "Use {serial}, {make} and {title} where the lot's values go."
+EDIT_SERIAL_TABLE = "Edit serial table…"
+EDIT_SERIAL_TABLE_TIP = "Open the serial number table (CSV) in your spreadsheet app"
 # Messages
 SAVED = "Saved lot {n}"
 DELETED = "Deleted {what}"
@@ -184,7 +347,8 @@ SOURCE_UPDATE_BUTTON = "Update && Restart"
 SOURCE_UPDATING = "Updating…"
 SOURCE_FAILED_TITLE = "Couldn't update"
 SOURCE_FAILED = "Nothing was changed.\n\n{error}"
-SOURCE_UPDATES_WAITING = "{changes} available: Help → Check for Updates"
+SOURCE_UPDATES_WAITING = "{changes} available"
+SOURCE_UPDATES_WAITING_TIP = "Open Check for Updates"
 UPDATES_CURRENT = "You're running version {version}."
 UPDATES_CHECKING = "Checking for updates…"
 UPDATES_FAILED_TITLE = "Couldn't check for updates"
@@ -217,7 +381,7 @@ UPDATES_READY = (
 )
 
 # Import
-IMPORT_BTN = "⤓   Import Excel…"
+IMPORT_BTN = "Import from Excel…"
 IMPORT_PICK = "Choose old auction spreadsheets"
 IMPORT_TITLE = "Import Auction"
 IMPORT_HEADING = "Import {name}"
@@ -273,6 +437,5 @@ ALREADY_RUNNING = "Another Simple Auction instance is running, or the settings f
 
 DARK_MODE = "Dark mode"
 SHIPPING_NAV = "Shipping"
-CATALOGUE_NAV = "Back to Catalogue"
-CATALOGUE_WORKSPACE = "Simple Auction · Catalogue"
-SHIPPING_WORKSPACE = "Simple Auction · Shipping"
+CATALOGUE_NAV = "Catalogue"
+RELOAD_SHARED = "Reload from host"

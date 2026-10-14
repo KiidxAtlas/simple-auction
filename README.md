@@ -11,23 +11,74 @@ uv run simple-auction
 
 ## Appearance
 
-Settings opens on **Auction setup**, with the next auction number and spacious
-editable lists for serial-number links and conditions. Double-click a cell to
-edit it; use Move up / Move down to reorder conditions. **General** contains appearance, local
-network sharing, folders, the serial lookup table, and the research API key.
-**Save** applies changes from both tabs; **Cancel** closes the dialog.
+The top bar switches between **Catalogue** and **Shipping**. **Settings** sits at
+the top right, beside the sharing status when sharing is on. Short confirmations
+(exports, imports, deletions) appear briefly at the bottom of the window.
 
-In **Settings → General**, turn **Dark mode** on or off and click **Save**. The change
-applies immediately and is remembered after restarting. Until you save a
-preference, the app follows your system's light/dark appearance.
+In the catalogue, the sidebar has **New auction**, an import button for old Excel
+files, and a search box that filters lots by number or title. An amber dot marks
+lots still missing a title or condition; hover a lot to see its full title and
+what it needs. The lot editor shows the lot's title as its heading, with
+‹ › buttons (or Ctrl+Page Up/Down) for the previous and next lot. Details are grouped
+into **Identification**, **Specs & compliance**, and **Listing**. Photos and
+consignment appear beside them on wide windows and below them on narrow ones. Drag
+photos onto the Photos area or use **Add photos…**. The serial lookup sites appear
+as buttons under the Serial # field. Title and description are marked **Auto-filled** because
+the app keeps make, model and condition text up to date. The header holds previous/next
+lot, **New lot** (Ctrl+N), **Research**, and **⋯** with the Excel export for the
+lot's auction and Delete. Right-click a lot or auction in the sidebar for New lot,
+Export and Delete; the sidebar list can also be used with the keyboard (arrows,
+Return to open or close an auction). On narrow windows the editor reflows into one
+column instead of cutting fields off.
+
+Settings lists its sections on the left. **Auction setup** has the next auction
+number, the serial-number lookup sites and the serial table. **Conditions** lists
+the dropdown choices; select one to edit its name and description sentence on the
+right, and use the arrows (or drag) to reorder. Serial lookup sites are edited the
+same way. **Listing fields** decides what goes where: two side-by-side lists,
+**Title** and **Description**, each with a checkbox per field. Tick a field to
+include it and drag it (or select it and use the arrows) to set the order; a field
+can go in the title, the description, both or neither. In the title, fields above
+**Your own wording** go before the words you type and fields below go after a dash.
+In the description, each ticked field becomes a line such as `Make: Colt` at the top,
+above your own text; the condition sentence is always added at the end. An
+**Example** box shows the resulting title and description as you change things.
+Under **Your own fields** click **Add field** to create fields such as Caliber or
+Finish: each gets a box in the lot editor's **More details** card and appears in
+both lists (ticked for the description), optionally with text before the value in
+the title (e.g. "Cal:" gives "Cal: .45 ACP"). Values are saved per lot with
+make/model (not as Excel columns); removing a field keeps lots' existing values.
+Empty values and CA legality **N/A** are omitted. Changes apply to the open lot and
+future edits, rather than rewriting every saved lot. **Appearance**, **Sharing**,
+**Folders** and **Research** (the Gemini API key) follow. **Save** applies all
+sections; **Cancel** discards pending changes.
+
+The lot editor includes **Caliber**, **Type** (Rifle, Shotgun or Handgun, or type
+your own), optional **Barrel length** (enter the units with the value) and **CA
+legality**: **Legal for CA**, **Not CA legal**, or **N/A** (the default). These are
+saved with make/model in the lot-details file (or shared database), not as
+additional Excel columns, and can be imported from spreadsheet columns such as
+"Caliber"/"Gauge" and "Type".
+
+Titles follow the house style by default:
+`Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition OK FOR CA`
+(make, model, caliber, type, your own wording, `SN:` serial, condition followed by
+"Condition", then `OK FOR CA` / `NOT CA LEGAL`; N/A adds nothing). The description
+starts with Make, Model, Caliber and Type lines. Settings saved with the previous
+built-in title layout switch to this one automatically; a layout you changed is
+kept. Titles written in the older style ("S/N:", " - Good") are recognised and
+rewritten in the new style when the lot is opened.
+
+In **Settings → Appearance**, choose **Match system**, **Light** or **Dark** and click
+**Save**. The change applies immediately and is remembered after restarting.
 
 ## Local network sharing
 
 Install the same app version on both computers. No Docker, Supabase, cloud
 account, or internet connection is needed for sharing.
 
-1. On the computer holding your existing data, open **Settings → General → Local network
-   sharing**. Enable **Share with another computer** and **This computer is the
+1. On the computer holding your existing data, open **Settings → Sharing**.
+   Enable **Share with another computer** and **This computer is the
    host**, then click **Save**. Copy its six-digit pairing code.
 2. On the second computer, enable **Share with another computer**, leave **This
    computer is the host** off, and click **Find host**. Select the host, paste its
@@ -84,27 +135,29 @@ with the app closed, including the database and hidden shared-photo directory.
 
 ## Proxibid → Pirate Ship shipping
 
-Click **Shipping** in the top header to switch the entire workspace; **Back to
-Catalogue** returns to lot editing, preserving your selection and saving edits.
+Click **Shipping** in the top bar to switch the entire workspace; **Catalogue**
+returns to lot editing, preserving your selection and saving edits.
 
 `examples/proxibid-winning-bidders-example.csv` is a fictional import demo.
 Its headers and column order have not been verified against an actual Proxibid
 export; use your own Winning Bidders Report and confirm its column mapping.
 
 1. Export the **Winning Bidders Report** from Proxibid as CSV. Drop it on the
-   shipping page or click **Import Proxibid CSV…**. Review the buyer preview and
-   click **Import buyers**. Recognized columns are mapped automatically; use
+   shipping page or click **Choose CSV file…** (later imports use the import
+   button next to the auction list). Review the buyer preview and click
+   **Import buyers**. Recognized columns are mapped automatically; use
    **Adjust CSV columns** if the preview needs correcting. Choose the country
    to use for rows that do not specify one.
 2. Select a buyer from the queue. Their shipping address and lots appear on the
-   right; the center contains the package form. Use **Edit** to correct an address
+   right; the center contains the package form. The queue names what needs fixing
+   (for example **No street address**). Use **Edit** to correct an address
    or **Local pickup** to leave that buyer out of shipping. Search or filter the
    queue to find buyers needing attention.
 3. Type the weight in **pounds** (for example `2.5`) and the box dimensions in
    **inches**. Tab moves through length, width, and height. Click **Mark ready &
-   next**, or press Enter in the height field. For multiple boxes, use **+ Box**,
+   next**, or press Enter in the height field. For multiple boxes, use **Add box**,
    select it, and check the lots that belong in it. Each lot belongs to one box.
-4. Click **Export to Pirate Ship…** to save ready shipments. The export panel
+4. Click **Export to Pirate Ship…** under the buyer queue to save ready shipments. The export panel
    shows the file and buttons to open its folder and Pirate Ship. In Pirate Ship,
    choose **Upload a Spreadsheet** and select the CSV. Map **Weight (Pounds)** to
    pounds and the dimensions to inches, review the shipments, then buy labels.

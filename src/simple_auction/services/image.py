@@ -92,6 +92,40 @@ def prepare_photos(
     return changes, out
 
 
+RESEARCH_IMAGE_SIDE = 1280  # px; enough to read markings, small to upload
+RAW_IMAGE_LIMIT = 7_000_000  # bytes; larger originals that PIL can't open are skipped
+_RAW_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+}
+
+
+def research_image(path: Path) -> tuple[bytes, str] | None:
+    """A photo prepared for sending to research: (data, mime type).
+
+    Downscaled to a JPEG when Pillow can read it; formats it can't (e.g.
+    HEIC without a plugin) are sent as they are if small enough. None if the
+    file can't be used.
+    """
+    try:
+        with Image.open(path) as img:
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            img.thumbnail((RESEARCH_IMAGE_SIDE, RESEARCH_IMAGE_SIDE))
+            return _encode(img, 85), "image/jpeg"
+    except OSError:
+        mime = _RAW_MIME.get(path.suffix.lower())
+        try:
+            if mime and path.stat().st_size <= RAW_IMAGE_LIMIT:
+                return path.read_bytes(), mime
+        except OSError:
+            pass
+    return None
+
+
 def _encode(img: Image.Image, quality: int) -> bytes:
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=quality)

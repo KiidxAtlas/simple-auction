@@ -1,34 +1,74 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QIntValidator
 from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QCheckBox,
+    QButtonGroup,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
+    QRadioButton,
     QScrollArea,
-    QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
-    QTabWidget,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from simple_auction.models import Lot
 from simple_auction.services import api_key, lookup, numbering
 from simple_auction.services.conditions import ConditionOption, cleaned, save_file
 from simple_auction.services.config import Config
+from simple_auction.services.listing import condition_desc
 from simple_auction.services.serial_links import SerialLink, is_valid
+from simple_auction.services.title_layout import (
+    DESC_EXCLUDED,
+    MAX_CUSTOM_TEXT,
+    CustomField,
+    desc_lines,
+    is_custom_key,
+    labels,
+    new_custom_id,
+    prefixes,
+    update_desc,
+    update_title,
+)
 from simple_auction.ui import strings, theme
+from simple_auction.ui.field_order import FieldOrderList
+from simple_auction.ui.list_editor import Field, ListEditor
 from simple_auction.ui.network_settings import NetworkSettings
+
+SECTION_AUCTION = "Auction setup"
+SECTION_CONDITIONS = "Conditions"
+SECTION_LISTING = "Listing fields"
+SECTION_APPEARANCE = "Appearance"
+SECTION_SHARING = "Sharing"
+SECTION_FOLDERS = "Folders"
+SECTION_RESEARCH = "Research"
+# (title, nav icon, one-line description shown under the page title)
+SECTIONS = [
+    (SECTION_AUCTION, "book", strings.SETTINGS_AUCTION_ABOUT),
+    (SECTION_CONDITIONS, "list", strings.SETTINGS_CONDITIONS_ABOUT),
+    (SECTION_LISTING, "type", strings.SETTINGS_LISTING_ABOUT),
+    (SECTION_APPEARANCE, "sun", strings.SETTINGS_APPEARANCE_ABOUT),
+    (SECTION_SHARING, "wifi", strings.SETTINGS_SHARING_ABOUT),
+    (SECTION_FOLDERS, "folder", strings.SETTINGS_FOLDERS_ABOUT),
+    (SECTION_RESEARCH, "sparkle", strings.SETTINGS_RESEARCH_ABOUT),
+]
+
+# Theme choices: (label, Config.dark_mode value)
+THEMES = [
+    (strings.THEME_SYSTEM, None),
+    (strings.THEME_LIGHT, False),
+    (strings.THEME_DARK, True),
+]
 
 
 class SettingsDialog(QDialog):
@@ -36,237 +76,547 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(strings.SETTINGS)
         self.setObjectName("settingsDialog")
-        self.setMinimumWidth(640)
+        self.setMinimumSize(720, 480)
+        self._original_conditions = list(config.conditions)
+        self._conditions_path = config.conditions_path
 
         self.network = NetworkSettings(config.sharing, self)
-
-        self.folder = QLineEdit(str(config.base_dir))
-        self.photos = QLineEdit(str(config.photos_dir))
-
-        self.dark_mode_toggle = QCheckBox(strings.DARK_MODE)
-        self.dark_mode_toggle.setChecked(
-            theme.colors() == theme.DARK
-            if config.dark_mode is None
-            else config.dark_mode
-        )
-        self._suggested = numbering.next_auction(existing, config.step, config.start_at)
-        self.next_number = QLineEdit(str(self._suggested))
-        self.next_number.setValidator(QIntValidator(1, 99_999_000, self.next_number))
-        self.next_number.setFixedWidth(140)
-        next_row = QHBoxLayout()
-        next_row.addWidget(self.next_number)
-        next_row.addStretch(1)
-
-        edit_table = QPushButton(strings.EDIT_SERIAL_TABLE)
-        edit_table.clicked.connect(self._edit_serial_table)
-        table_row = QHBoxLayout()
-        table_row.addWidget(edit_table)
-        table_row.addStretch(1)
-
-        # Links under the Serial # field: one row per link, name + URL.
-        self.links = QTableWidget(0, 2)
-        self.links.setObjectName("linksTable")
-        self.links.setHorizontalHeaderLabels([strings.LINK_NAME, strings.LINK_URL])
-        self.links.setColumnWidth(0, 210)
-        self.links.horizontalHeader().setStretchLastSection(True)
-        self.links.verticalHeader().hide()
-        self.links.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.links.setMinimumHeight(140)
-        self.links.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
-        )
-        self.links.verticalHeader().setDefaultSectionSize(38)
-        self.links.setWordWrap(False)
-        self.links.setAccessibleName("Serial number links")
-        for link in config.serial_links:
-            self._add_link_row(link.name, link.url)
-        add_link = QPushButton("Add link")
-        add_link.clicked.connect(self._new_link)
-        self.remove_link = QPushButton("Remove selected")
-        remove_link = self.remove_link
-        remove_link.setEnabled(False)
-        self.links.itemSelectionChanged.connect(
-            lambda: remove_link.setEnabled(bool(self.links.selectedIndexes()))
-        )
-        remove_link.clicked.connect(self._remove_links)
-        links_hint = QLabel("Double-click a cell to edit. " + strings.LINKS_HINT)
-        links_hint.setObjectName("hint")
-        links_row = QHBoxLayout()
-        links_hint.setWordWrap(True)
-        links_row.addWidget(add_link)
-        links_row.addWidget(remove_link)
-        links_row.addStretch(1)
-
-        # Conditions: name + the sentence added to the description. Row order
-        # is the dropdown order.
-        self.conditions_table = QTableWidget(0, 2)
-        self.conditions_table.setObjectName("linksTable")
-        self.conditions_table.setHorizontalHeaderLabels(
-            [strings.CONDITION_NAME, strings.CONDITION_NOTE]
-        )
-        self.conditions_table.setColumnWidth(0, 210)
-        self.conditions_table.horizontalHeader().setStretchLastSection(True)
-        self.conditions_table.verticalHeader().hide()
-        self.conditions_table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.conditions_table.setMinimumHeight(320)
-        self.conditions_table.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
-        )
-        self.conditions_table.setAccessibleName("Auction conditions")
-        self.conditions_table.verticalHeader().setMinimumSectionSize(44)
-        self.conditions_table.verticalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.conditions_table.setWordWrap(True)
-        self._original_conditions = list(config.conditions)
-        for option in config.conditions:
-            self._add_condition_row(option.name, option.note)
-        self._conditions_path = config.conditions_path
-        add_condition = QPushButton("Add condition")
-        add_condition.clicked.connect(self._new_condition)
-        self.remove_condition = QPushButton("Remove selected")
-        remove_condition = self.remove_condition
-        remove_condition.clicked.connect(self._remove_conditions)
-        self.move_up = QPushButton("Move up")
-        up = self.move_up
-        up.clicked.connect(lambda: self._move_condition(-1))
-        self.move_down = QPushButton("Move down")
-        down = self.move_down
-        down.clicked.connect(lambda: self._move_condition(1))
-        self.conditions_table.itemSelectionChanged.connect(
-            self._update_condition_actions
-        )
-        self.conditions_table.currentCellChanged.connect(self._update_condition_actions)
-        self.conditions_table.model().rowsRemoved.connect(
-            self._update_condition_actions
-        )
-        self._update_condition_actions()
-        conditions_hint = QLabel(
-            "Double-click a cell to edit. " + strings.CONDITIONS_HINT
-        )
-        conditions_hint.setObjectName("hint")
-        open_file = QPushButton(strings.OPEN_CONDITIONS_FILE)
-        open_file.setToolTip(strings.OPEN_CONDITIONS_FILE_TIP)
-        open_file.clicked.connect(self._open_conditions_file)
-        conditions_row = QHBoxLayout()
-        conditions_hint.setWordWrap(True)
-        for button in (add_condition, up, down, remove_condition):
-            conditions_row.addWidget(button)
-        conditions_row.addStretch(1)
-        conditions_footer = QHBoxLayout()
-        conditions_footer.addWidget(conditions_hint, 1)
-        conditions_footer.addWidget(open_file)
-
-        # Gemini API key: typed here, saved to the Keychain, never shown again.
-        self.key = QLineEdit()
-        self.key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.forget_key = QPushButton(strings.FORGET_KEY)
-        self.forget_key.clicked.connect(self._forget_key)
-        key_row = QHBoxLayout()
-        key_row.addWidget(self.key, 1)
-        key_row.addWidget(self.forget_key)
-        self._refresh_key_state()
+        self.nav = QListWidget()
+        self.nav.setObjectName("settingsNav")
+        self.nav.setFixedWidth(190)
+        self.nav.setIconSize(QSize(16, 16))
+        self.nav.setAccessibleName("Settings sections")
+        self.pages = QStackedWidget()
+        builders = {
+            SECTION_AUCTION: lambda: self._auction_page(config, existing),
+            SECTION_CONDITIONS: lambda: self._conditions_page(config),
+            SECTION_LISTING: lambda: self._listing_page(config),
+            SECTION_APPEARANCE: lambda: self._appearance_page(config),
+            SECTION_SHARING: lambda: self.network,
+            SECTION_FOLDERS: lambda: self._folders_page(config),
+            SECTION_RESEARCH: self._research_page,
+        }
+        # Pages whose lists grow into spare height; others keep to the top.
+        fills = {SECTION_AUCTION, SECTION_CONDITIONS}
+        for title, icon, about in SECTIONS:
+            item = QListWidgetItem(theme.icon(icon), title)
+            item.setSizeHint(QSize(0, 36))
+            self.nav.addItem(item)
+            self.pages.addWidget(
+                self._page(title, about, builders[title](), title in fills)
+            )
+        self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.nav.setCurrentRow(0)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save
             | QDialogButtonBox.StandardButton.Cancel
         )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setObjectName("primary")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        footer = QFrame()
+        footer.setObjectName("settingsFooter")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(20, 12, 20, 12)
+        footer_hint = QLabel(strings.SETTINGS_FOOTER_HINT)
+        footer_hint.setObjectName("fieldHint")
+        footer_layout.addWidget(footer_hint, 1)
+        footer_layout.addWidget(buttons)
 
-        self.tabs = QTabWidget()
-        self.tabs.setObjectName("settingsTabs")
-        self.tabs.setDocumentMode(True)
+        side = QFrame()
+        side.setObjectName("settingsSide")
+        side_layout = QVBoxLayout(side)
+        side_layout.setContentsMargins(10, 16, 10, 10)
+        side_layout.addWidget(self.nav)
 
-        general = QWidget()
-        general.setObjectName("scrollBody")
-        general_layout = QVBoxLayout(general)
-        general_layout.setSpacing(14)
-        appearance = self._section("Appearance")
-        appearance.layout().addWidget(self.dark_mode_toggle)
-        general_layout.addWidget(appearance)
-        general_layout.addWidget(self.network)
-        folders = self._section("Folders")
-        folders.layout().addWidget(QLabel(strings.AUCTIONS_FOLDER))
-        folders.layout().addLayout(self._folder_row(self.folder, strings.PICK_FOLDER))
-        folders.layout().addSpacing(6)
-        folders.layout().addWidget(QLabel(strings.PHOTOS_FOLDER))
-        folders.layout().addLayout(
-            self._folder_row(self.photos, strings.PICK_PHOTOS_FOLDER)
-        )
-        general_layout.addWidget(folders)
-        serial_table = self._section("Serial number lookup")
-        serial_table.layout().addLayout(table_row)
-        general_layout.addWidget(serial_table)
-        research = self._section("Research")
-        research.layout().addWidget(QLabel(strings.API_KEY))
-        research.layout().addLayout(key_row)
-        general_layout.addWidget(research)
-        general_layout.addStretch(1)
-
-        auction = QWidget()
-        auction.setObjectName("scrollBody")
-        auction_layout = QVBoxLayout(auction)
-        auction_layout.setSpacing(14)
-        numbering_section = self._section("Auction numbering")
-        next_row.insertWidget(0, QLabel(strings.NEXT_AUCTION))
-        numbering_section.layout().addLayout(next_row)
-        auction_layout.addWidget(numbering_section)
-        links = self._section(strings.SERIAL_LINKS.rstrip(":"))
-        links.layout().addLayout(links_row)
-        links.layout().addWidget(self.links, 1)
-        links.layout().addWidget(links_hint)
-        links.setMinimumHeight(links.layout().minimumSize().height())
-        auction_layout.addWidget(links, 1)
-        conditions = self._section(strings.CONDITIONS.rstrip(":"))
-        conditions.layout().addLayout(conditions_row)
-        conditions.layout().addWidget(self.conditions_table, 1)
-        conditions.layout().addLayout(conditions_footer)
-        conditions.setMinimumHeight(conditions.layout().minimumSize().height())
-        auction_layout.addWidget(conditions, 3)
-        self.tabs.addTab(self._scroll(auction), "Auction setup")
-        self.tabs.addTab(self._scroll(general), "General")
-
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(side)
+        body.addWidget(self.pages, 1)
         outer = QVBoxLayout(self)
-        outer.addWidget(self.tabs, 1)
-        outer.addWidget(buttons)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addLayout(body, 1)
+        outer.addWidget(footer)
         available = self.screen().availableGeometry()
-        self.resize(min(980, available.width() - 60), min(940, available.height() - 60))
+        self.resize(
+            min(1000, available.width() - 60), min(780, available.height() - 60)
+        )
+
+    def show_section(self, title: str) -> None:
+        self.nav.setCurrentRow([s[0] for s in SECTIONS].index(title))
+
+    # -- pages --------------------------------------------------------------
+
+    def _auction_page(self, config: Config, existing: list[int]) -> QWidget:
+        self._suggested = numbering.next_auction(existing, config.step, config.start_at)
+        self.next_number = QLineEdit(str(self._suggested))
+        self.next_number.setValidator(QIntValidator(1, 99_999_000, self.next_number))
+        self.next_number.setFixedWidth(140)
+        self.next_number.setAccessibleName(strings.NEXT_AUCTION)
+        numbering_section = self._section(strings.NUMBERING_SECTION)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        label = QLabel(strings.NEXT_AUCTION)
+        label.setBuddy(self.next_number)
+        row.addWidget(label)
+        row.addWidget(self.next_number)
+        row.addStretch(1)
+        numbering_section.layout().addLayout(row)
+        numbering_section.layout().addWidget(self._hint(strings.NEXT_AUCTION_HINT))
+
+        self.links = ListEditor(
+            [
+                Field("name", strings.LINK_NAME, strings.LINK_NAME_PLACEHOLDER),
+                Field(
+                    "url",
+                    strings.LINK_URL,
+                    "https://example.com/lookup?serial={serial}",
+                    hint=strings.LINKS_HINT,
+                ),
+            ],
+            noun="link",
+            add_label=strings.ADD_LINK,
+            empty_text=strings.LINKS_EMPTY,
+            new_values={"name": "", "url": "https://"},
+            accessible_name="Serial number links",
+        )
+        for link in config.serial_links:
+            self.links.add_row({"name": link.name, "url": link.url})
+        self.links.select_first()
+        links = self._section(strings.SERIAL_LOOKUP_SECTION)
+        links.layout().addWidget(self._hint(strings.SERIAL_LOOKUP_ABOUT))
+        links.layout().addWidget(self.links, 1)
+        edit_table = QPushButton(strings.EDIT_SERIAL_TABLE)
+        edit_table.setToolTip(strings.EDIT_SERIAL_TABLE_TIP)
+        theme.set_icon(edit_table, "external")
+        edit_table.clicked.connect(self._edit_serial_table)
+        table_row = QHBoxLayout()
+        table_row.addWidget(self._hint(strings.SERIAL_TABLE_ABOUT), 1)
+        table_row.addWidget(edit_table)
+        links.layout().addSpacing(4)
+        links.layout().addLayout(table_row)
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        layout.addWidget(numbering_section)
+        layout.addWidget(links, 1)
+        return page
+
+    def _conditions_page(self, config: Config) -> QWidget:
+        self.conditions_editor = ListEditor(
+            [
+                Field("name", strings.CONDITION_NAME, strings.CONDITION_NAME_HINT),
+                Field(
+                    "note",
+                    strings.CONDITION_NOTE,
+                    strings.CONDITION_NOTE_PLACEHOLDER,
+                    multiline=True,
+                ),
+            ],
+            noun="condition",
+            add_label=strings.ADD_CONDITION,
+            empty_text=strings.CONDITIONS_EMPTY,
+            accessible_name="Auction conditions",
+        )
+        for option in config.conditions:
+            self.conditions_editor.add_row({"name": option.name, "note": option.note})
+        self.conditions_editor.select_first()
+        self.move_up = self.conditions_editor.move_up
+        self.move_down = self.conditions_editor.move_down
+        section = self._section(strings.CONDITIONS_SECTION)
+        section.layout().addWidget(self._hint(strings.CONDITIONS_HINT))
+        section.layout().addWidget(self.conditions_editor, 1)
+        open_file = QPushButton(strings.OPEN_CONDITIONS_FILE)
+        open_file.setToolTip(strings.OPEN_CONDITIONS_FILE_TIP)
+        theme.set_icon(open_file, "external")
+        open_file.clicked.connect(self._open_conditions_file)
+        footer = QHBoxLayout()
+        footer.addWidget(self._hint(strings.CONDITIONS_FILE_ABOUT), 1)
+        footer.addWidget(open_file)
+        section.layout().addSpacing(4)
+        section.layout().addLayout(footer)
+        return section
+
+    def _listing_page(self, config: Config) -> QWidget:
+        """Choose and order the fields written into titles and descriptions,
+        add fields of your own, and see an example of the result."""
+        custom = {f.key: f.label for f in config.custom_fields}
+        all_labels = labels(config.custom_fields)
+
+        # Title: fields before / after the user's own wording.
+        self.title_order = FieldOrderList(
+            "Title fields in display order",
+            fixed={"title": strings.LISTING_OWN_WORDING},
+        )
+        for key in config.title_fields + [
+            k for k in all_labels if k not in config.title_fields
+        ]:
+            self.title_order.add(
+                key, self._field_label(key, all_labels), key in config.title_fields
+            )
+        self.title_order.item("title").setToolTip(strings.TITLE_FIELDS_CUSTOM_TIP)
+        # Kept for code that works with the list itself.
+        self.title_fields_list = self.title_order.list
+
+        # Description: "Label: value" lines at the top, in this order.
+        self.desc_order = FieldOrderList("Description fields in display order")
+        for key in config.desc_fields + [
+            k
+            for k in all_labels
+            if k not in config.desc_fields and k not in DESC_EXCLUDED
+        ]:
+            self.desc_order.add(
+                key, self._field_label(key, all_labels), key in config.desc_fields
+            )
+
+        # A grid keeps the two lists level even when one hint wraps more.
+        columns = QGridLayout()
+        columns.setHorizontalSpacing(16)
+        columns.setVerticalSpacing(6)
+        for col, (title, hint, order) in enumerate(
+            (
+                (
+                    strings.LISTING_TITLE_COLUMN,
+                    strings.LISTING_TITLE_HINT,
+                    self.title_order,
+                ),
+                (
+                    strings.LISTING_DESC_COLUMN,
+                    strings.LISTING_DESC_HINT,
+                    self.desc_order,
+                ),
+            )
+        ):
+            heading = QLabel(title)
+            heading.setObjectName("columnTitle")
+            text = QLabel(hint)
+            text.setObjectName("fieldHint")
+            text.setWordWrap(True)
+            text.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            columns.addWidget(heading, 0, col)
+            columns.addWidget(text, 1, col)
+            columns.addWidget(order, 2, col)
+            columns.setColumnStretch(col, 1)
+        arrange = self._section(strings.LISTING_ARRANGE_SECTION)
+        arrange.layout().addWidget(self._hint(strings.LISTING_ARRANGE_HINT))
+        arrange.layout().addLayout(columns, 1)
+
+        # Live example of the title and description these settings produce.
+        self.preview_title = QLabel()
+        self.preview_title.setObjectName("previewTitle")
+        self.preview_title.setWordWrap(True)
+        self.preview_title.setTextFormat(Qt.TextFormat.PlainText)
+        self.preview_desc = QLabel()
+        self.preview_desc.setObjectName("previewDesc")
+        self.preview_desc.setWordWrap(True)
+        self.preview_desc.setTextFormat(Qt.TextFormat.PlainText)
+        preview = self._section(strings.LISTING_PREVIEW_SECTION)
+        preview.layout().addWidget(self._hint(strings.LISTING_PREVIEW_HINT))
+        for caption, label in (
+            (strings.LISTING_PREVIEW_TITLE, self.preview_title),
+            (strings.LISTING_PREVIEW_DESC, self.preview_desc),
+        ):
+            text = QLabel(caption)
+            text.setObjectName("fieldLabel")
+            preview.layout().addWidget(text)
+            frame = QFrame()
+            frame.setObjectName("previewBox")
+            inner = QVBoxLayout(frame)
+            inner.setContentsMargins(12, 10, 12, 10)
+            inner.addWidget(label)
+            preview.layout().addWidget(frame)
+
+        # Your own fields: a box each in the lot editor, usable above.
+        self.custom_editor = ListEditor(
+            [
+                Field(
+                    "label",
+                    strings.CUSTOM_FIELD_NAME,
+                    strings.CUSTOM_FIELD_NAME_PLACEHOLDER,
+                    hint=strings.CUSTOM_FIELD_NAME_HINT,
+                ),
+                Field(
+                    "prefix",
+                    strings.CUSTOM_FIELD_PREFIX,
+                    strings.CUSTOM_FIELD_PREFIX_PLACEHOLDER,
+                    hint=strings.CUSTOM_FIELD_PREFIX_HINT,
+                ),
+            ],
+            noun="field",
+            add_label=strings.ADD_CUSTOM_FIELD,
+            empty_text=strings.CUSTOM_FIELDS_EMPTY,
+            new_values=lambda: {"id": new_custom_id(), "label": "", "prefix": ""},
+            accessible_name="Your own lot fields",
+        )
+        for field_ in config.custom_fields:
+            self.custom_editor.add_row(
+                {"id": field_.id, "label": field_.label, "prefix": field_.prefix}
+            )
+        self.custom_editor.select_first()
+        self.custom_editor.list.setMinimumHeight(140)
+        own = self._section(strings.CUSTOM_FIELDS_SECTION)
+        own.layout().addWidget(self._hint(strings.CUSTOM_FIELDS_HINT))
+        own.layout().addWidget(self.custom_editor, 1)
+        self._custom_keys = set(custom)
+
+        self.custom_editor.changed.connect(self._sync_custom_fields)
+        self.title_order.changed.connect(self._update_preview)
+        self.desc_order.changed.connect(self._update_preview)
+        self._update_preview()
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        # The lists come first; the example sits right under them so the
+        # effect of a change is visible without scrolling far.
+        layout.addWidget(arrange)
+        layout.addWidget(preview)
+        layout.addWidget(own)
+        return page
+
+    @staticmethod
+    def _field_label(key: str, all_labels: dict[str, str]) -> str:
+        label = all_labels.get(key, key)
+        if is_custom_key(key):
+            return strings.CUSTOM_FIELD_IN_LIST.format(label=label)
+        return label
+
+    def _sync_custom_fields(self) -> None:
+        """Keep both lists in step with your own fields: new ones are added
+        (shown in the description), renamed ones relabelled, removed or
+        unnamed ones taken out."""
+        wanted = {f.key: f.label for f in self.custom_fields()}
+        for order in (self.title_order, self.desc_order):
+            for key in [k for k in order.field_keys() if is_custom_key(k)]:
+                if key not in wanted:
+                    order.remove(key)
+        for key, label in wanted.items():
+            text = strings.CUSTOM_FIELD_IN_LIST.format(label=label)
+            for order, checked in ((self.title_order, False), (self.desc_order, True)):
+                if order.item(key) is None:
+                    order.add(key, text, checked)
+                else:
+                    order.set_label(key, text)
+        self._custom_keys = set(wanted)
+        self._update_preview()
+
+    def _update_preview(self) -> None:
+        custom = self.custom_fields()
+        # The house-style example: with the default layout and no extra
+        # wording this reads exactly
+        # "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition OK FOR CA".
+        sample = Lot(
+            1,
+            make="Arsenal",
+            model="SAM7SF",
+            caliber="7.62x39",
+            gun_type="Rifle",
+            serial="BE 53 1936",
+            year=2009,
+            condition="Excellent",
+            owner="J. Smith",
+            book_no="12",
+            barrel_length="16.3 inches",
+            ca_legality="Legal for CA",
+            custom={
+                f.id: strings.LISTING_PREVIEW_VALUE.format(label=f.label)
+                for f in custom
+            },
+        )
+        fields = self.title_fields()
+        self.preview_title.setText(
+            update_title("", Lot(0), fields, sample, fields, prefixes(custom)) or "—"
+        )
+        lines = desc_lines(sample, self.desc_fields(), labels(custom))
+        desc = update_desc(strings.LISTING_PREVIEW_DESC_TEXT, [], lines)
+        self.preview_desc.setText(
+            condition_desc(desc, "Excellent", strings.LISTING_PREVIEW_CONDITION)
+        )
+
+    def _appearance_page(self, config: Config) -> QWidget:
+        section = self._section(strings.THEME_SECTION)
+        self.theme_buttons = QButtonGroup(self)
+        self.theme_options = {}
+        for label, value in THEMES:
+            button = QRadioButton(label)
+            self.theme_buttons.addButton(button)
+            self.theme_options[value] = button
+            section.layout().addWidget(button)
+        self.theme_options[config.dark_mode].setChecked(True)
+        section.layout().addWidget(self._hint(strings.THEME_HINT))
+        return section
+
+    def _folders_page(self, config: Config) -> QWidget:
+        self.folder = QLineEdit(str(config.base_dir))
+        self.photos = QLineEdit(str(config.photos_dir))
+        section = self._section(strings.FOLDERS_SECTION)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+        rows = (
+            (
+                strings.AUCTIONS_FOLDER,
+                self.folder,
+                strings.PICK_FOLDER,
+                strings.MAIN_FOLDER_HINT,
+            ),
+            (
+                strings.PHOTOS_FOLDER,
+                self.photos,
+                strings.PICK_PHOTOS_FOLDER,
+                strings.PHOTOS_FOLDER_HINT,
+            ),
+        )
+        for i, (label, field, title, hint) in enumerate(rows):
+            text = QLabel(label)
+            text.setObjectName("fieldLabel")
+            text.setBuddy(field)
+            field.setAccessibleName(label)
+            browse = QPushButton(strings.BROWSE)
+            browse.clicked.connect(lambda _=False, f=field, t=title: self._browse(f, t))
+            show = QPushButton(strings.SHOW_FOLDER)
+            theme.set_icon(show, "folder")
+            show.setToolTip(strings.SHOW_FOLDER_TIP)
+            show.clicked.connect(lambda _=False, f=field: self._show_folder(f))
+            base = i * 4
+            if i:
+                grid.setRowMinimumHeight(base - 1, 14)
+            grid.addWidget(text, base, 0, 1, 3)
+            grid.addWidget(field, base + 1, 0)
+            grid.addWidget(browse, base + 1, 1)
+            grid.addWidget(show, base + 1, 2)
+            grid.addWidget(self._hint(hint), base + 2, 0, 1, 3)
+        grid.setColumnStretch(0, 1)
+        section.layout().addLayout(grid)
+        return section
+
+    def _research_page(self) -> QWidget:
+        section = self._section(strings.RESEARCH_SECTION)
+        section.layout().addWidget(self._hint(strings.RESEARCH_ABOUT))
+        label = QLabel(strings.API_KEY)
+        label.setObjectName("fieldLabel")
+        self.key = QLineEdit()
+        self.key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.key.setAccessibleName(strings.API_KEY)
+        label.setBuddy(self.key)
+        self.show_key = QPushButton(strings.SHOW_KEY)
+        self.show_key.setCheckable(True)
+        self.show_key.toggled.connect(
+            lambda shown: (
+                self.key.setEchoMode(
+                    QLineEdit.EchoMode.Normal if shown else QLineEdit.EchoMode.Password
+                ),
+                self.show_key.setText(strings.HIDE_KEY if shown else strings.SHOW_KEY),
+            )
+        )
+        self.forget_key = QPushButton(strings.FORGET_KEY)
+        theme.set_icon(self.forget_key, "trash")
+        self.forget_key.clicked.connect(self._forget_key)
+        key_row = QHBoxLayout()
+        key_row.addWidget(self.key, 1)
+        key_row.addWidget(self.show_key)
+        key_row.addWidget(self.forget_key)
+        self.key_state = QLabel()
+        self.key_state.setObjectName("fieldHint")
+        get_key = QPushButton(strings.GET_API_KEY)
+        get_key.setObjectName("link")
+        theme.set_icon(get_key, "external", "accent")
+        get_key.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        get_key.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(strings.GET_API_KEY_URL))
+        )
+        section.layout().addSpacing(4)
+        section.layout().addWidget(label)
+        section.layout().addLayout(key_row)
+        section.layout().addWidget(self.key_state)
+        section.layout().addWidget(get_key, 0, Qt.AlignmentFlag.AlignLeft)
+        self._refresh_key_state()
+        return section
+
+    # -- building blocks ----------------------------------------------------
+
+    def _page(self, title: str, about: str, content: QWidget, fills: bool):
+        page = QWidget()
+        page.setObjectName("scrollBody")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(28, 22, 24, 22)
+        layout.setSpacing(6)
+        heading = QLabel(title)
+        heading.setObjectName("settingsPageTitle")
+        layout.addWidget(heading)
+        layout.addWidget(self._hint(about))
+        layout.addSpacing(12)
+        layout.addWidget(content, 1 if fills else 0)
+        if not fills:
+            layout.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        return scroll
 
     @staticmethod
     def _section(title: str) -> QFrame:
         frame = QFrame()
         frame.setObjectName("settingsSection")
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(10)
         heading = QLabel(title)
         heading.setObjectName("settingsSectionTitle")
         layout.addWidget(heading)
         return frame
 
     @staticmethod
-    def _scroll(content: QWidget) -> QScrollArea:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(content)
-        return scroll
+    def _hint(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("hint")
+        label.setWordWrap(True)
+        return label
+
+    # -- results ------------------------------------------------------------
 
     def accept(self):
         if self.network.validate():
             super().accept()
         else:
-            self.tabs.setCurrentIndex(1)
+            self.show_section(SECTION_SHARING)
 
     def sharing(self):
         return self.network.value()
 
-    def dark_mode(self) -> bool:
-        return self.dark_mode_toggle.isChecked()
+    def dark_mode(self) -> bool | None:
+        """True/False for a fixed theme, None to follow the system."""
+        return next(
+            value for value, button in self.theme_options.items() if button.isChecked()
+        )
+
+    def custom_fields(self) -> list[CustomField]:
+        """Custom fields with a name, in the order listed."""
+        return [
+            CustomField(
+                row["id"],
+                row["label"].strip()[:MAX_CUSTOM_TEXT],
+                row["prefix"].strip()[:MAX_CUSTOM_TEXT],
+            )
+            for row in self.custom_editor.rows()
+            if row["label"].strip()
+        ]
+
+    def title_fields(self) -> list[str]:
+        """Ticked title fields in order, around the user's own wording."""
+        return self.title_order.included()
+
+    def desc_fields(self) -> list[str]:
+        """Ticked description fields in order."""
+        return self.desc_order.included()
 
     def base_dir(self) -> Path:
         return Path(self.folder.text()).expanduser()
@@ -282,50 +632,40 @@ class SettingsDialog(QDialog):
         """A key typed in, or None to keep the current one."""
         return self.key.text().strip() or None
 
+    def serial_links(self) -> list[SerialLink]:
+        """The rows that make a usable link (name + http(s) URL)."""
+        links = (
+            SerialLink(row["name"].strip(), row["url"].strip())
+            for row in self.links.rows()
+        )
+        return [link for link in links if is_valid(link)]
+
+    def original_conditions(self) -> list[ConditionOption]:
+        return list(self._original_conditions)
+
+    def conditions(self) -> list[ConditionOption]:
+        """The condition rows, in order (blank and repeated names dropped)."""
+        return cleaned(
+            [
+                ConditionOption(row["name"], row["note"])
+                for row in self.conditions_editor.rows()
+            ]
+        )
+
+    # -- actions ------------------------------------------------------------
+
     def _refresh_key_state(self) -> None:
         saved = api_key.saved() is not None
         self.key.setPlaceholderText(
-            strings.API_KEY_SAVED if saved else strings.API_KEY_PLACEHOLDER
+            strings.API_KEY_SAVED_PLACEHOLDER if saved else strings.API_KEY_PLACEHOLDER
         )
+        self.key_state.setText(strings.API_KEY_SAVED if saved else strings.API_KEY_NONE)
         self.forget_key.setEnabled(saved)
 
     def _forget_key(self) -> None:
         api_key.forget()
         self.key.clear()
         self._refresh_key_state()
-
-    def serial_links(self) -> list[SerialLink]:
-        """The rows that make a usable link (name + http(s) URL)."""
-        rows = []
-        for r in range(self.links.rowCount()):
-            name, url = (self.links.item(r, c) for c in (0, 1))
-            link = SerialLink(
-                name.text().strip() if name else "", url.text().strip() if url else ""
-            )
-            if is_valid(link):
-                rows.append(link)
-        return rows
-
-    def _add_link_row(self, name: str, url: str) -> int:
-        row = self.links.rowCount()
-        self.links.insertRow(row)
-        self.links.setItem(row, 0, QTableWidgetItem(name))
-        self.links.setItem(row, 1, QTableWidgetItem(url))
-        return row
-
-    def _new_link(self) -> None:
-        row = self._add_link_row("", "https://")
-        self.links.setCurrentCell(row, 0)
-        self.links.editItem(self.links.item(row, 0))
-
-    def _remove_links(self) -> None:
-        for row in sorted(
-            {i.row() for i in self.links.selectedIndexes()}, reverse=True
-        ):
-            self.links.removeRow(row)
-
-    def original_conditions(self) -> list[ConditionOption]:
-        return list(self._original_conditions)
 
     def _open_conditions_file(self) -> None:
         """Open conditions.yaml in the default text editor (or show it in the
@@ -336,75 +676,17 @@ class SettingsDialog(QDialog):
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
-    def conditions(self) -> list[ConditionOption]:
-        """The condition rows, in order (blank and repeated names dropped)."""
-        table = self.conditions_table
-        rows = []
-        for r in range(table.rowCount()):
-            name, note = (table.item(r, c) for c in (0, 1))
-            rows.append(
-                ConditionOption(
-                    name.text() if name else "", note.text() if note else ""
-                )
-            )
-        return cleaned(rows)
-
-    def _add_condition_row(self, name: str, note: str) -> int:
-        table = self.conditions_table
-        row = table.rowCount()
-        table.insertRow(row)
-        table.setItem(row, 0, QTableWidgetItem(name))
-        table.setItem(row, 1, QTableWidgetItem(note))
-        return row
-
-    def _new_condition(self) -> None:
-        row = self._add_condition_row("", "")
-        self.conditions_table.setCurrentCell(row, 0)
-        self.conditions_table.editItem(self.conditions_table.item(row, 0))
-
-    def _remove_conditions(self) -> None:
-        table = self.conditions_table
-        for row in sorted({i.row() for i in table.selectedIndexes()}, reverse=True):
-            table.removeRow(row)
-
-    def _update_condition_actions(self, *_args) -> None:
-        table = self.conditions_table
-        selected = {i.row() for i in table.selectedIndexes()}
-        row = table.currentRow()
-        single = len(selected) == 1 and row in selected
-        self.remove_condition.setEnabled(bool(selected))
-        self.move_up.setEnabled(single and row > 0)
-        self.move_down.setEnabled(single and row < table.rowCount() - 1)
-
-    def _move_condition(self, step: int) -> None:
-        table = self.conditions_table
-        row = table.currentRow()
-        target = row + step
-        selected = {i.row() for i in table.selectedIndexes()}
-        if (
-            len(selected) != 1
-            or row not in selected
-            or not 0 <= target < table.rowCount()
-        ):
-            return
-        for col in (0, 1):
-            a, b = table.takeItem(row, col), table.takeItem(target, col)
-            table.setItem(row, col, b)
-            table.setItem(target, col, a)
-        table.setCurrentCell(target, table.currentColumn())
-
-    def _folder_row(self, field: QLineEdit, title: str) -> QHBoxLayout:
-        browse = QPushButton(strings.BROWSE)
-        browse.clicked.connect(lambda: self._browse(field, title))
-        row = QHBoxLayout()
-        row.addWidget(field, 1)
-        row.addWidget(browse)
-        return row
-
     def _browse(self, field: QLineEdit, title: str) -> None:
         chosen = QFileDialog.getExistingDirectory(self, title, field.text())
         if chosen:
             field.setText(chosen)
+
+    @staticmethod
+    def _show_folder(field: QLineEdit) -> None:
+        path = Path(field.text()).expanduser()
+        while not path.exists() and path != path.parent:
+            path = path.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _edit_serial_table(self) -> None:
         path = lookup.table_path(Config(base_dir=self.base_dir()).data_dir)

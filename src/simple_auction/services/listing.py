@@ -102,7 +102,9 @@ def make_model_desc(desc: str, make: str, model: str) -> str:
     return "\n\n".join(part for part in (head, rest) if part)
 
 
-def apply_condition(lot: Lot, options: list[ConditionOption]) -> Lot:
+def apply_condition(
+    lot: Lot, options: list[ConditionOption], *, include_title: bool = True
+) -> Lot:
     """Condition suffix on the title and sentence in the description.
 
     With no condition picked, the lot is left exactly as it is.
@@ -117,5 +119,9 @@ def apply_condition(lot: Lot, options: list[ConditionOption]) -> Lot:
     if option is not None:
         desc = condition_desc(lot.desc, option.name, option.note, known)
     return replace(
-        lot, title=condition_title(lot.title, lot.condition, known), desc=desc
+        lot,
+        title=condition_title(lot.title, lot.condition, known)
+        if include_title
+        else lot.title,
+        desc=desc,
     )

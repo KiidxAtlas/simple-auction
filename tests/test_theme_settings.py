@@ -66,23 +66,26 @@ def test_theme_override_and_system_default(app, monkeypatch, system_dark, mode):
 
 
 @pytest.mark.parametrize("mode", [False, True])
-def test_settings_checkbox_uses_saved_preference(app, tmp_path, mode):
+def test_settings_theme_choice_uses_saved_preference(app, tmp_path, mode):
     theme.apply(app, dark_mode=not mode)
     dialog = SettingsDialog(Config(base_dir=tmp_path, dark_mode=mode), [])
     try:
         assert dialog.dark_mode() is mode
-        dialog.dark_mode_toggle.setChecked(not mode)
-        assert dialog.dark_mode() is not mode
+        dialog.theme_options[not mode].setChecked(True)
+        assert dialog.dark_mode() is (not mode)
+        dialog.theme_options[None].setChecked(True)
+        assert dialog.dark_mode() is None
     finally:
         dialog.deleteLater()
         app.processEvents()
 
 
-def test_legacy_checkbox_matches_current_system_theme(app, tmp_path):
+def test_legacy_settings_offer_match_system(app, tmp_path):
     theme.apply(app, dark_mode=True)
     dialog = SettingsDialog(Config(base_dir=tmp_path), [])
     try:
-        assert dialog.dark_mode()
+        assert dialog.theme_options[None].isChecked()
+        assert dialog.dark_mode() is None
     finally:
         dialog.deleteLater()
         app.processEvents()
@@ -111,7 +114,7 @@ def test_settings_save_switches_both_ways_and_persists(window, tmp_path, monkeyp
     chosen = True
 
     def accept(dialog):
-        dialog.dark_mode_toggle.setChecked(chosen)
+        dialog.theme_options[chosen].setChecked(True)
         dialog.accept()
         return dialog.result()
 
@@ -129,7 +132,7 @@ def test_settings_save_switches_both_ways_and_persists(window, tmp_path, monkeyp
 
 def test_settings_cancel_does_not_change_theme_or_save(window, monkeypatch):
     def reject(dialog):
-        dialog.dark_mode_toggle.setChecked(True)
+        dialog.theme_options[True].setChecked(True)
         dialog.reject()
         return dialog.result()
 
@@ -145,7 +148,7 @@ def test_settings_cancel_does_not_change_theme_or_save(window, monkeypatch):
 
 def test_failed_settings_save_keeps_previous_theme(window, monkeypatch):
     def accept(dialog):
-        dialog.dark_mode_toggle.setChecked(True)
+        dialog.theme_options[True].setChecked(True)
         dialog.accept()
         return dialog.result()
 
@@ -203,55 +206,86 @@ assert entry.main() == 0
     assert result.returncode == 0, result.stderr
 
 
+def test_settings_follow_system_theme_is_saved(window, tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    save = Config.save
+    monkeypatch.setattr(Config, "save", lambda self: save(self, path))
+
+    def accept(dialog):
+        dialog.theme_options[None].setChecked(True)
+        dialog.accept()
+        return dialog.result()
+
+    monkeypatch.setattr(SettingsDialog, "exec", accept)
+    window.open_settings()
+    assert window.config.dark_mode is None
+    assert Config.load(path).dark_mode is None
+
+
 def test_settings_controls_remain_reachable_on_small_screens(app, tmp_path):
     dialog = SettingsDialog(Config(base_dir=tmp_path), [])
     try:
-        dialog.resize(680, 480)
+        dialog.resize(720, 480)
         dialog.show()
         app.processEvents()
         buttons = dialog.findChild(QDialogButtonBox)
-        assert dialog.tabs.count() == 2
-        assert dialog.tabs.currentIndex() == 0
-        assert [dialog.tabs.tabText(i) for i in range(2)] == [
+        save = buttons.button(QDialogButtonBox.StandardButton.Save)
+        assert save.objectName() == "primary"
+        sections = [dialog.nav.item(i).text() for i in range(dialog.nav.count())]
+        assert sections == [
             "Auction setup",
-            "General",
+            "Conditions",
+            "Listing fields",
+            "Appearance",
+            "Sharing",
+            "Folders",
+            "Research",
         ]
-        for index in range(dialog.tabs.count()):
-            dialog.tabs.setCurrentIndex(index)
+        assert dialog.pages.currentIndex() == 0
+        expected_visible = {
+            "Auction setup": [dialog.next_number, dialog.links],
+            "Conditions": [dialog.conditions_editor],
+            "Listing fields": [dialog.title_fields_list, dialog.desc_order],
+            "Appearance": [dialog.theme_options[None]],
+            "Sharing": [dialog.network],
+            "Folders": [dialog.folder, dialog.photos],
+            "Research": [dialog.key],
+        }
+        everything = [w for ws in expected_visible.values() for w in ws]
+        for section, visible in expected_visible.items():
+            dialog.show_section(section)
             app.processEvents()
-            scroll = dialog.tabs.currentWidget()
+            scroll = dialog.pages.currentWidget()
             assert isinstance(scroll, QScrollArea)
+            for widget in everything:
+                assert widget.isVisible() == (widget in visible), (section, widget)
             assert buttons.isVisible()
-            assert dialog.rect().contains(buttons.geometry())
-            assert scroll.verticalScrollBar().maximum() > 0
-            if index == 1:
-                assert dialog.dark_mode_toggle.isVisible()
-                assert dialog.network.isVisible()
-                assert not dialog.next_number.isVisible()
-            else:
-                assert dialog.next_number.isVisible()
-                assert dialog.links.isVisible()
-                assert dialog.conditions_table.isVisible()
-                assert not dialog.dark_mode_toggle.isVisible()
-                assert not dialog.network.isVisible()
+            assert dialog.rect().contains(
+                buttons.geometry().translated(buttons.parentWidget().pos())
+            )
+            # Nothing on the page is wider than the page (no cut-off controls).
+            assert scroll.widget().width() <= scroll.viewport().width()
             scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
             app.processEvents()
-            assert dialog.rect().contains(buttons.geometry())
-        # Switching tabs preserves pending edits until the shared Save action.
+            assert buttons.isVisible()
+        # Switching sections preserves pending edits until the shared Save action.
         dialog.next_number.setText("52000")
-        dialog.tabs.setCurrentIndex(1)
-        dialog.dark_mode_toggle.setChecked(True)
-        dialog.tabs.setCurrentIndex(0)
+        dialog.show_section("Appearance")
+        dialog.theme_options[True].setChecked(True)
+        dialog.show_section("Auction setup")
         assert dialog.next_auction() == 52000
-        assert dialog.dark_mode()
+        assert dialog.dark_mode() is True
         # Lists use extra window space instead of staying at a fixed height.
-        small_height = dialog.conditions_table.height()
+        dialog.show_section("Conditions")
+        app.processEvents()
+        editor = dialog.conditions_editor
+        small_height = editor.list.height()
         dialog.resize(980, 1000)
         app.processEvents()
-        assert dialog.conditions_table.height() > small_height
-        assert not dialog.move_up.isEnabled()
-        assert not dialog.move_down.isEnabled()
-        dialog.conditions_table.setCurrentCell(0, 0)
+        assert editor.list.height() > small_height
+        # The first condition is open for editing from the start.
+        assert editor.list.currentRow() == 0
+        assert editor.inputs["name"].text() == dialog.conditions()[0].name
         assert not dialog.move_up.isEnabled()
         assert dialog.move_down.isEnabled()
         first = dialog.conditions()[0]
@@ -260,5 +294,32 @@ def test_settings_controls_remain_reachable_on_small_screens(app, tmp_path):
         assert dialog.move_up.isEnabled()
     finally:
         dialog.close()
+        dialog.deleteLater()
+        app.processEvents()
+
+
+def test_settings_lists_are_edited_in_a_detail_form(app, tmp_path):
+    dialog = SettingsDialog(Config(base_dir=tmp_path), [])
+    try:
+        links = dialog.links
+        links.add_button.click()
+        links.inputs["name"].setText("Proof house")
+        links.inputs["url"].setText("https://proof.test/{serial}")
+        assert dialog.serial_links()[-1].name == "Proof house"
+        assert links.list.currentItem().text() == "Proof house"
+        links.remove_button.click()
+        assert all(link.name != "Proof house" for link in dialog.serial_links())
+
+        editor = dialog.conditions_editor
+        editor.list.setCurrentRow(0)
+        note = editor.inputs["note"]
+        note.setPlainText("A longer sentence that wraps in the editor.")
+        assert (
+            dialog.conditions()[0].note == "A longer sentence that wraps in the editor."
+        )
+        # Selecting another row shows that row's own values.
+        editor.list.setCurrentRow(1)
+        assert editor.inputs["name"].text() == dialog.conditions()[1].name
+    finally:
         dialog.deleteLater()
         app.processEvents()

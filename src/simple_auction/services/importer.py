@@ -29,6 +29,8 @@ SYNONYMS: dict[str, list[str]] = {
     "condition": ["condition", "cond", "grade"],
     "year": ["year", "yr", "year made", "manufacture year", "mfg year", "dom"],
     "make": ["make", "maker", "manufacturer", "brand", "mfg"],
+    "caliber": ["caliber", "calibre", "cal", "gauge", "chambering"],
+    "gun_type": ["type", "gun type", "firearm type", "category"],
     "model": ["model"],
     "title": ["title", "name", "item", "lot title", "headline"],
     "desc": ["desc", "description", "details", "notes", "lot description"],
@@ -37,7 +39,19 @@ SYNONYMS: dict[str, list[str]] = {
 FIELD_ORDER = list(SYNONYMS)
 
 # Too general to trust inside a longer header ("Consignor Name").
-_VAGUE = {"name", "item", "notes", "details", "sn", "s n", "lot", "book", "yr"}
+_VAGUE = {
+    "name",
+    "item",
+    "notes",
+    "details",
+    "sn",
+    "s n",
+    "lot",
+    "book",
+    "yr",
+    "cal",
+    "type",
+}
 
 
 class SheetReadError(Exception):
@@ -275,6 +289,8 @@ def build_lots(
                 year=_year(cell(row, "year")),
                 make=cell(row, "make"),
                 model=cell(row, "model"),
+                caliber=cell(row, "caliber"),
+                gun_type=cell(row, "gun_type"),
             )
         )
     return lots

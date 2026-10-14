@@ -222,3 +222,91 @@ def test_real_rate_limit_without_search_still_raises(monkeypatch):
 
     with pytest.raises(compat_errors.RateLimitError):
         run(ResearchChat(Busy()), "Q")
+
+
+def test_photos_are_sent_once_and_autofill_parses_suggestions(tmp_path):
+    import asyncio
+    import json
+
+    from PIL import Image
+
+    from simple_auction.services.title_layout import CustomField
+
+    photo = tmp_path / "front.jpg"
+    Image.new("RGB", (3000, 2000)).save(photo)
+    caliber = CustomField("cal1", "Caliber")
+    requests = []
+
+    class Stream:
+        def __init__(self, events):
+            self.events = iter(events)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self.events)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+        async def close(self):
+            pass
+
+    answers = [
+        json.dumps(
+            {
+                "make": "Colt",
+                "model": "Python",
+                "year": "about 1965",
+                "serial": "",
+                "barrel_length": "6 inches",
+                "custom_cal1": ".357 Magnum",
+            }
+        ),
+        "Answer",
+    ]
+
+    async def create(**request):
+        requests.append(request)
+        return Stream([created(f"i{len(requests)}"), text(answers.pop(0)), completed()])
+
+    client = NS(aio=NS(interactions=NS(create=create)))
+    chat = ResearchChat(client, custom_fields=[caliber])
+    lot = Lot(1, make="Colt", photos=[photo], custom={"cal1": ""})
+
+    async def run():
+        filled = [e async for e in chat.autofill_async(lot)]
+        followup = [e async for e in chat.ask_async("When?", lot)]
+        return filled, followup
+
+    filled, followup = asyncio.run(run())
+    assert ("photos", "1") in [(e.kind, e.text) for e in filled]
+    (result,) = [e for e in filled if e.kind == "filled"]
+    # Bad years are dropped; custom fields come back under their title key.
+    assert result.values == {
+        "make": "Colt",
+        "model": "Python",
+        "barrel_length": "6 inches",
+        caliber.key: ".357 Magnum",
+    }
+    first = requests[0]
+    assert first["response_format"]["schema"]["properties"]["custom_cal1"]
+    parts = first["input"]
+    assert parts[0]["type"] == "text" and "Caliber" not in parts[0]["text"]
+    assert parts[1]["type"] == "image" and parts[1]["mime_type"] == "image/jpeg"
+    # The follow-up continues the conversation without re-sending the photo.
+    assert isinstance(requests[1]["input"], str)
+    assert requests[1]["previous_interaction_id"] == "i1"
+    assert "response_format" not in requests[1]
+    assert not any(e.kind == "photos" for e in followup)
+
+
+def test_photos_can_be_switched_off(tmp_path):
+    from PIL import Image
+
+    photo = tmp_path / "front.jpg"
+    Image.new("RGB", (10, 10)).save(photo)
+    chat = ResearchChat(FakeClient(answer("Hi")), include_photos=False)
+    run(chat, "Q", Lot(1, photos=[photo]))
+    assert isinstance(chat._client.requests[0]["input"], str)

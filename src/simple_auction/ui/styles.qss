@@ -1,8 +1,10 @@
-/* Values like $accent are filled in from theme.py. */
+/* Values like $accent and $fs_body are filled in from theme.py.
+   Type scale: $fs_caption < $fs_small < $fs_body < $fs_heading < $fs_title
+   (< $fs_display for the shipping weight). Use these, not raw sizes. */
 
 QWidget {
     color: $text;
-    font-size: 13px;
+    font-size: ${fs_body}px;
 }
 
 QMainWindow,
@@ -27,20 +29,467 @@ QSplitter::handle:hover {
     background: $accent_soft;
 }
 
+/* ---- Top bar ------------------------------------------------------- */
+
 QWidget#workspaceHeader {
     background: $surface;
     border-bottom: 1px solid $border;
 }
 
-QDoubleSpinBox {
-    background: $field;
+QLabel#appName {
+    font-size: ${fs_heading}px;
+    font-weight: 700;
+}
+
+/* The app mark: an accent tile with a gavel, left of the app name. */
+QLabel#brandMark {
+    background: $accent;
+    border-radius: 8px;
+}
+
+QFrame#segmented {
+    background: $hover;
+    border-radius: 9px;
+}
+
+QFrame#segmented QPushButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 5px 14px;
+    color: $muted;
+    font-weight: 600;
+}
+
+QFrame#segmented QPushButton:hover {
+    color: $text;
+}
+
+QFrame#segmented QPushButton:checked {
+    background: $surface;
+    border-color: $field_border;
+    border-bottom-color: $shadow;
+    color: $text;
+}
+
+QFrame#segmented QPushButton:focus {
+    border: 1px solid $accent;
+}
+
+QLabel#chip {
+    background: $hover;
+    color: $muted;
+    border-radius: 10px;
+    padding: 3px 10px;
+    font-size: ${fs_small}px;
+    font-weight: 600;
+}
+
+QLabel#chip[state="ok"] {
+    background: $accent_soft;
+    color: $accent;
+}
+
+QLabel#chip[state="warning"] {
+    background: transparent;
+    border: 1px solid $warning;
+    color: $warning;
+}
+
+QLabel#toast {
+    background: $text;
+    color: $bg;
+    border-radius: 8px;
+    padding: 10px 16px;
+}
+
+/* ---- Buttons ------------------------------------------------------- */
+
+QPushButton {
+    background: $surface;
+    border: 1px solid $field_border;
+    border-radius: 7px;
+    padding: 7px 14px;
+    font-weight: 500;
+}
+
+QPushButton:hover {
+    background: $hover;
+}
+
+QPushButton:pressed {
+    background: $border;
+}
+
+QPushButton:focus {
+    border: 2px solid $accent;
+    padding: 6px 13px;
+}
+
+QPushButton:disabled {
+    color: $muted;
+}
+
+QPushButton:checked {
+    background: $accent_soft;
+    border-color: $accent;
+    color: $accent;
+}
+
+QPushButton::menu-indicator {
+    width: 0;
+}
+
+QPushButton#primary {
+    background: $accent;
+    color: $accent_text;
+    border: 1px solid $accent_hover;
+    font-weight: 600;
+}
+
+QPushButton#primary:hover {
+    background: $accent_hover;
+    border-color: $accent_hover;
+}
+
+QPushButton#primary:focus {
+    border: 2px solid $text;
+}
+
+QPushButton#primary:disabled {
+    background: $surface;
+    color: $muted;
+    border-color: $border;
+}
+
+QPushButton#iconButton {
+    padding: 7px;
+}
+
+QPushButton#iconButton:focus {
+    padding: 6px;
+}
+
+QPushButton#ghost {
+    background: transparent;
+    border: none;
+    color: $muted;
+    text-align: left;
+    padding: 8px 10px;
+}
+
+QPushButton#ghost:hover {
+    background: $hover;
+    color: $text;
+}
+
+QPushButton#ghost:focus {
+    background: $hover;
+    color: $text;
+}
+
+QPushButton#link {
+    background: transparent;
+    border: none;
+    color: $accent;
+    padding: 2px 4px;
+}
+
+QPushButton#link:hover {
+    color: $accent_hover;
+    text-decoration: underline;
+}
+
+QPushButton#link:focus {
+    text-decoration: underline;
+}
+
+QPushButton#link:disabled {
+    color: $muted;
+}
+
+QPushButton#ghostBordered {
+    background: transparent;
     border: 1px solid $border;
     border-radius: 6px;
+    padding: 7px 14px;
+}
+
+/* Serial lookup sites under the Serial # field: compact link chips. */
+QPushButton#lookupLink {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: ${fs_small}px;
+}
+
+QPushButton#lookupLink:focus {
+    padding: 2px 9px;
+}
+
+/* ---- Inputs -------------------------------------------------------- */
+
+QLineEdit,
+QPlainTextEdit,
+QComboBox {
+    background: $field;
+    border: 1px solid $field_border;
+    border-radius: 7px;
+    padding: 7px 9px;
+    selection-background-color: $accent;
+    selection-color: $accent_text;
+}
+
+QLineEdit:hover,
+QPlainTextEdit:hover,
+QComboBox:hover {
+    border-color: $muted;
+}
+
+/* A 2px ring, with the padding trimmed so nothing shifts. */
+QLineEdit:focus,
+QComboBox:focus {
+    border: 2px solid $accent;
+    padding: 6px 8px;
+}
+
+QPlainTextEdit:focus {
+    border: 2px solid $accent;
+    padding: 6px 8px;
+}
+
+QLineEdit:disabled,
+QComboBox:disabled {
+    color: $muted;
+    background: $bg;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 28px;
+}
+
+QComboBox::down-arrow {
+    image: url($chevron);
+    width: 12px;
+    height: 12px;
+}
+
+QComboBox QAbstractItemView {
+    background: $surface;
+    border: 1px solid $border;
+    padding: 4px;
+    outline: 0;
+    selection-background-color: $accent_soft;
+    selection-color: $text;
+}
+
+QDoubleSpinBox {
+    background: $field;
+    border: 1px solid $field_border;
+    border-radius: 7px;
     padding: 7px 4px;
     selection-background-color: $accent;
 }
 
-/* ---- Shipping ----------------------------------------------------- */
+QCheckBox:focus {
+    color: $accent;
+}
+
+/* A checkbox in a field grid, as tall as the inputs beside it. */
+QCheckBox#fieldCheck {
+    min-height: 34px;
+    spacing: 8px;
+}
+
+/* ---- Text roles ---------------------------------------------------- */
+
+QLabel#lotTitle {
+    font-size: ${fs_title}px;
+    font-weight: 700;
+}
+
+QLabel#breadcrumb {
+    color: $muted;
+    font-size: ${fs_small}px;
+    font-weight: 600;
+}
+
+QLabel#saveState {
+    color: $muted;
+    font-size: ${fs_small}px;
+}
+
+QLabel#saveState[state="error"] {
+    color: $danger;
+    font-weight: 600;
+}
+
+QLabel#subtitle,
+QLabel#hint {
+    color: $muted;
+}
+
+QLabel#fieldHint {
+    color: $muted;
+    font-size: ${fs_small}px;
+}
+
+QLabel#emptyTitle {
+    font-size: ${fs_title}px;
+    font-weight: 700;
+}
+
+QLabel#sectionLabel {
+    color: $muted;
+    font-size: ${fs_caption}px;
+    font-weight: 600;
+}
+
+QLabel#fieldLabel {
+    color: $muted;
+    font-size: ${fs_small}px;
+    font-weight: 600;
+}
+
+QLabel#charCount {
+    color: $muted;
+    font-size: ${fs_caption}px;
+}
+
+QLabel#charCount[over="true"] {
+    color: $danger;
+    font-weight: 600;
+}
+
+QLabel#autoBadge {
+    background: $accent_soft;
+    color: $accent;
+    border-radius: 8px;
+    padding: 1px 7px;
+    font-size: ${fs_caption}px;
+    font-weight: 600;
+}
+
+/* ---- Cards --------------------------------------------------------- */
+
+/* A hairline border with a darker bottom edge: a flat-UI hint of lift. */
+QFrame#card {
+    background: $surface;
+    border: 1px solid $border;
+    border-bottom-color: $shadow;
+    border-radius: ${radius}px;
+}
+
+QLabel#cardTitle {
+    font-size: ${fs_heading}px;
+    font-weight: 600;
+}
+
+/* Small accent tile holding a card's icon, left of its title. */
+QLabel#cardIcon {
+    background: $accent_soft;
+    border-radius: 7px;
+}
+
+/* ---- Sidebar ------------------------------------------------------- */
+
+QFrame#sidebar {
+    background: $sidebar;
+    border-right: 1px solid $border;
+}
+
+QTreeWidget#lotTree {
+    background: transparent;
+    border: none;
+    outline: 0;
+}
+
+QLabel#sidebarEmpty {
+    color: $muted;
+    font-size: ${fs_small}px;
+    padding: 8px 4px;
+}
+
+/* ---- Lot editor ---------------------------------------------------- */
+
+QFrame#photoDrop {
+    background: $field;
+    border: 2px dashed $border;
+    border-radius: ${radius}px;
+}
+
+QFrame#photoDrop[state="dragging"] {
+    background: $accent_soft;
+    border-color: $accent;
+}
+
+QListWidget#photos {
+    background: transparent;
+    border: none;
+    outline: 0;
+}
+
+QListWidget#photos::item {
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QListWidget#photos::item:selected {
+    background: $accent_soft;
+    color: $text;
+}
+
+QFrame#emptyIcon {
+    background: $accent_soft;
+    border-radius: 28px;
+}
+
+/* ---- Tables (settings) --------------------------------------------- */
+
+QTableWidget#linksTable {
+    background: $field;
+    border: 1px solid $border;
+    border-radius: 6px;
+    selection-background-color: $accent_soft;
+    selection-color: $text;
+    outline: 0;
+}
+
+QTableWidget#linksTable::item {
+    border-bottom: 1px solid $border;
+    padding: 4px 8px;
+}
+
+QTableWidget#linksTable::item:selected {
+    background: $accent_soft;
+    color: $text;
+}
+
+QHeaderView::section {
+    background: $surface;
+    color: $muted;
+    border: none;
+    border-bottom: 1px solid $border;
+    padding: 6px 8px;
+    font-size: ${fs_small}px;
+    font-weight: 600;
+}
+
+/* ---- Research panel ------------------------------------------------ */
+
+QFrame#researchPanel {
+    background: $surface;
+    border-left: 1px solid $border;
+}
+
+QTextBrowser#transcript {
+    background: transparent;
+    border: none;
+    selection-background-color: $accent;
+    selection-color: $accent_text;
+}
+
+/* ---- Shipping ------------------------------------------------------ */
 
 QFrame#shippingEmpty {
     background: $surface;
@@ -54,7 +503,7 @@ QFrame#shippingEmpty[state="dragging"] {
 }
 
 QLabel#shippingEmptyTitle {
-    font-size: 22px;
+    font-size: ${fs_title}px;
     font-weight: 700;
 }
 
@@ -92,7 +541,7 @@ QLabel#shippingStepDivider {
 QLabel#shippingPill {
     padding: 3px 10px;
     border-radius: 10px;
-    font-size: 12px;
+    font-size: ${fs_small}px;
     font-weight: 600;
     background: $hover;
     color: $muted;
@@ -124,6 +573,7 @@ QProgressBar#shippingProgress::chunk {
 QFrame#shippingActionBar {
     background: $surface;
     border: 1px solid $border;
+    border-bottom-color: $shadow;
     border-radius: 10px;
 }
 
@@ -142,29 +592,28 @@ QLabel#shippingCheck[state="done"] {
 }
 
 QLabel#shippingAddressText {
-    font-size: 14px;
+    font-size: ${fs_body}px;
 }
 
 QFrame#shippingQueue,
-QFrame#shippingCard,
-QFrame#shippingFooter {
+QFrame#shippingCard {
     background: $surface;
     border: 1px solid $border;
+    border-bottom-color: $shadow;
     border-radius: 10px;
 }
 
 QLabel#shippingBuyerTitle {
-    font-size: 24px;
+    font-size: ${fs_title}px;
     font-weight: 700;
 }
 
 QLabel#shippingCardTitle {
-    font-size: 15px;
+    font-size: ${fs_heading}px;
     font-weight: 600;
 }
 
 QLabel#shippingFieldLabel {
-    font-size: 13px;
     font-weight: 600;
 }
 
@@ -178,17 +627,17 @@ QLineEdit#shippingWeight {
     background: transparent;
     border: none;
     padding: 0;
-    font-size: 28px;
+    font-size: ${fs_display}px;
     font-weight: 600;
 }
 
 QLabel#shippingWeightUnit {
-    font-size: 20px;
+    font-size: ${fs_title}px;
     color: $muted;
 }
 
 QLineEdit#shippingNumber {
-    font-size: 16px;
+    font-size: ${fs_heading}px;
 }
 
 QTableWidget#shippingBuyers {
@@ -222,250 +671,7 @@ QFrame#shippingExport {
     border-radius: 8px;
 }
 
-QWidget#content QPushButton#primary:disabled {
-    background: $surface;
-    color: $muted;
-    border-color: $border;
-}
-
-/* ---- Sidebar ------------------------------------------------------- */
-
-QFrame#sidebar {
-    background: $sidebar;
-    border-right: 1px solid $border;
-}
-
-QLabel#appName {
-    font-size: 15px;
-    font-weight: 700;
-}
-
-QLabel#sectionLabel {
-    color: $muted;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-QTreeWidget#lotTree {
-    background: transparent;
-    border: none;
-    outline: 0;
-}
-
-/* ---- Buttons ------------------------------------------------------- */
-
-QPushButton {
-    background: $surface;
-    border: 1px solid $border;
-    border-radius: 6px;
-    padding: 7px 14px;
-}
-
-QPushButton:hover {
-    background: $hover;
-}
-
-QPushButton:pressed {
-    background: $border;
-}
-
-QPushButton#primary {
-    background: $accent;
-    color: $accent_text;
-    border: 1px solid $accent;
-    font-weight: 600;
-}
-
-QPushButton#primary:hover {
-    background: $accent_hover;
-    border-color: $accent_hover;
-}
-
-QPushButton#ghost {
-    background: transparent;
-    border: none;
-    color: $muted;
-    text-align: left;
-    padding: 8px 10px;
-}
-
-QPushButton#ghost:hover {
-    background: $hover;
-    color: $text;
-}
-
-QPushButton#link {
-    background: transparent;
-    border: none;
-    color: $accent;
-    padding: 2px 4px;
-}
-
-QPushButton#link:hover {
-    color: $accent_hover;
-    text-decoration: underline;
-}
-
-/* ---- Lot editor ---------------------------------------------------- */
-
-QLabel#lotTitle {
-    font-size: 26px;
-    font-weight: 700;
-}
-
-QLabel#saveState {
-    color: $muted;
-    font-size: 12px;
-}
-
-QLabel#saveState[state="error"] {
-    color: $danger;
-    font-weight: 600;
-}
-
-QLabel#subtitle,
-QLabel#hint {
-    color: $muted;
-}
-
-QLabel#emptyTitle {
-    font-size: 18px;
-    font-weight: 600;
-}
-
-QFrame#card {
-    background: $surface;
-    border: 1px solid $border;
-    border-radius: ${radius}px;
-}
-
-QLabel#cardTitle {
-    font-size: 14px;
-    font-weight: 600;
-}
-
-QLabel#fieldLabel {
-    color: $muted;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-QLabel#charCount {
-    color: $muted;
-    font-size: 11px;
-}
-
-QLabel#charCount[over="true"] {
-    color: $danger;
-    font-weight: 600;
-}
-
-QLineEdit,
-QPlainTextEdit,
-QComboBox {
-    background: $field;
-    border: 1px solid $border;
-    border-radius: 6px;
-    padding: 7px 9px;
-    selection-background-color: $accent;
-    selection-color: $accent_text;
-}
-
-QLineEdit:hover,
-QPlainTextEdit:hover,
-QComboBox:hover {
-    border-color: $muted;
-}
-
-QLineEdit:focus,
-QPlainTextEdit:focus,
-QComboBox:focus {
-    border: 1px solid $accent;
-}
-
-QComboBox::drop-down {
-    border: none;
-    width: 28px;
-}
-
-QComboBox::down-arrow {
-    image: url($chevron);
-    width: 12px;
-    height: 12px;
-}
-
-QComboBox QAbstractItemView {
-    background: $surface;
-    border: 1px solid $border;
-    padding: 4px;
-    outline: 0;
-    selection-background-color: $accent_soft;
-    selection-color: $text;
-}
-
-QListWidget#photos {
-    background: $field;
-    border: 1px dashed $border;
-    border-radius: ${radius}px;
-    padding: 6px;
-    outline: 0;
-}
-
-QListWidget#photos::item {
-    border-radius: 6px;
-    padding: 4px;
-}
-
-QListWidget#photos::item:selected {
-    background: $accent_soft;
-    color: $text;
-}
-
-QTableWidget#linksTable {
-    background: $field;
-    border: 1px solid $border;
-    border-radius: 6px;
-    gridline-color: $border;
-    selection-background-color: $accent_soft;
-    selection-color: $text;
-}
-
-QHeaderView::section {
-    background: $surface;
-    color: $muted;
-    border: none;
-    border-bottom: 1px solid $border;
-    padding: 4px 6px;
-    font-weight: 600;
-}
-
-/* ---- Research panel ------------------------------------------------ */
-
-QFrame#researchPanel {
-    background: $surface;
-    border-left: 1px solid $border;
-}
-
-QTextBrowser#transcript {
-    background: transparent;
-    border: none;
-    selection-background-color: $accent;
-    selection-color: $accent_text;
-}
-
-QPushButton:checked {
-    background: $accent_soft;
-    border-color: $accent;
-}
-
-QPushButton#ghostBordered {
-    background: transparent;
-    border: 1px solid $border;
-    border-radius: 6px;
-    padding: 7px 14px;
-}
-
-/* ---- Menus, scrollbars, status bar --------------------------------- */
+/* ---- Menus, scrollbars --------------------------------------------- */
 
 QMenu {
     background: $surface;
@@ -484,10 +690,18 @@ QMenu::item:selected {
     color: $text;
 }
 
+QMenu::item:disabled {
+    color: $muted;
+}
+
 QMenu::separator {
     height: 1px;
     background: $border;
     margin: 4px 6px;
+}
+
+QMenuBar {
+    background: $surface;
 }
 
 QScrollArea {
@@ -528,47 +742,135 @@ QScrollBar::sub-page {
     background: none;
 }
 
-QStatusBar {
-    background: $bg;
-    color: $muted;
+/* ---- Settings ------------------------------------------------------ */
+
+QFrame#settingsSide {
+    background: $sidebar;
+    border-right: 1px solid $border;
+}
+
+QFrame#settingsFooter {
+    background: $surface;
     border-top: 1px solid $border;
 }
 
-/* ---- Settings ----------------------------------------------------- */
-
-QTabWidget#settingsTabs::pane {
+QListWidget#settingsNav {
+    background: transparent;
     border: none;
+    outline: 0;
 }
 
-QTabWidget#settingsTabs QTabBar::tab {
-    background: $bg;
+QListWidget#settingsNav::item {
+    padding: 0 10px;
+    margin-bottom: 2px;
+    border-radius: 6px;
     color: $muted;
-    padding: 10px 18px;
-    border-bottom: 2px solid transparent;
 }
 
-QTabWidget#settingsTabs QTabBar::tab:selected {
+QListWidget#settingsNav::item:hover {
+    background: $hover;
     color: $text;
-    border-bottom-color: $accent;
 }
 
-QTabWidget#settingsTabs QTabBar::tab:hover {
+QListWidget#settingsNav::item:selected {
     background: $accent_soft;
+    color: $text;
+    font-weight: 600;
 }
 
 QFrame#settingsSection {
     background: $surface;
     border: 1px solid $border;
+    border-bottom-color: $shadow;
     border-radius: 10px;
 }
 
 QLabel#settingsSectionTitle {
-    font-size: 15px;
+    font-size: ${fs_heading}px;
     font-weight: 600;
+}
+
+QLabel#settingsPageTitle {
+    font-size: ${fs_title}px;
+    font-weight: 700;
 }
 
 QDialog#settingsDialog QPushButton:disabled {
     color: $muted;
     background: $bg;
     border-color: $border;
+}
+
+QRadioButton {
+    spacing: 8px;
+    padding: 3px 0;
+}
+
+QRadioButton:focus,
+QCheckBox:focus {
+    color: $accent;
+}
+
+/* List + detail editors (serial lookup sites, conditions, title fields). */
+QListWidget#editorList {
+    background: $field;
+    border: 1px solid $border;
+    border-radius: 6px;
+    padding: 4px;
+    outline: 0;
+}
+
+QListWidget#editorList:focus {
+    border-color: $accent;
+}
+
+QListWidget#editorList::item {
+    padding: 7px 8px;
+    border-radius: 4px;
+}
+
+QListWidget#editorList::item:hover {
+    background: $hover;
+}
+
+QListWidget#editorList::item:selected {
+    background: $accent_soft;
+    color: $text;
+}
+
+QFrame#editorPanel {
+    background: $bg;
+    border: 1px solid $border;
+    border-radius: 8px;
+}
+
+/* Listing fields: column headings and the live example. */
+QLabel#columnTitle {
+    font-weight: 600;
+}
+
+QFrame#previewBox {
+    background: $bg;
+    border: 1px solid $border;
+    border-radius: 6px;
+}
+
+QLabel#previewTitle {
+    font-size: ${fs_heading}px;
+    font-weight: 600;
+}
+
+/* Checkboxes in lists: a visible box in both themes. */
+QListWidget#editorList::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid $muted;
+    border-radius: 4px;
+    background: $surface;
+}
+
+QListWidget#editorList::indicator:checked {
+    background: $accent;
+    border-color: $accent;
+    image: url($check);
 }

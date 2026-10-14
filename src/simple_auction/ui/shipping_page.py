@@ -98,10 +98,12 @@ class ShippingPage(QWidget):
             self.steps.append(step)
             steps.addWidget(step)
         header.addWidget(self.step_bar, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.import_button = QPushButton("Import CSV…")
-        self.import_button.setToolTip("Import a Proxibid winning-bidders CSV report.")
+        self.import_button = QPushButton()
+        self.import_button.setObjectName("iconButton")
+        self.import_button.setToolTip("Import another Proxibid winning-bidders CSV…")
+        self.import_button.setAccessibleName("Import CSV")
+        theme.set_icon(self.import_button, "import")
         self.import_button.clicked.connect(lambda: self.import_report())
-        header.addWidget(self.import_button)
         layout.addLayout(header)
 
         self.workspace = QStackedWidget()
@@ -206,7 +208,11 @@ class ShippingPage(QWidget):
         bar.addWidget(label)
         self.batches = QComboBox()
         self.batches.currentIndexChanged.connect(self._select_batch)
-        bar.addWidget(self.batches)
+        batch_row = QHBoxLayout()
+        batch_row.setSpacing(6)
+        batch_row.addWidget(self.batches, 1)
+        batch_row.addWidget(self.import_button)
+        bar.addLayout(batch_row)
         queue_layout.addWidget(self.batch_bar)
         queue_header = QHBoxLayout()
         queue_title = QLabel("Buyers")
@@ -226,6 +232,7 @@ class ShippingPage(QWidget):
         queue_layout.addWidget(self.progress_label)
         queue_layout.addSpacing(2)
         self.search = QLineEdit()
+        theme.set_icon(self.search, "search")
         self.search.setPlaceholderText("Search name, bidder, or lot")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._filter)
@@ -258,6 +265,13 @@ class ShippingPage(QWidget):
         )
         self.buyers.currentCellChanged.connect(self._select_buyer)
         queue_layout.addWidget(self.buyers, 1)
+        # Exporting covers the whole auction, so it lives with the queue.
+        self.export_button = QPushButton("Export to Pirate Ship…")
+        self.export_button.setObjectName("primary")
+        self.export_button.setMinimumHeight(40)
+        theme.set_icon(self.export_button, "export", "accent_text")
+        self.export_button.clicked.connect(self.export_report)
+        queue_layout.addWidget(self.export_button)
         self.splitter.addWidget(queue)
 
         review = QWidget()
@@ -284,7 +298,9 @@ class ShippingPage(QWidget):
         self.buyer_meta.setTextFormat(Qt.TextFormat.PlainText)
         buyer_labels.addWidget(self.buyer_meta)
         buyer_header.addLayout(buyer_labels, 1)
-        self.next_buyer = QPushButton("Next buyer →")
+        self.next_buyer = QPushButton("Next buyer")
+        theme.set_icon(self.next_buyer, "next")
+        self.next_buyer.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.next_buyer.setToolTip("Skip to the next buyer in the list.")
         self.next_buyer.clicked.connect(self._next_buyer)
         buyer_header.addWidget(self.next_buyer, 0, Qt.AlignmentFlag.AlignTop)
@@ -306,8 +322,8 @@ class ShippingPage(QWidget):
         self.packing_panel = QFrame()
         self.packing_panel.setObjectName("shippingCard")
         packing = QVBoxLayout(self.packing_panel)
-        packing.setContentsMargins(18, 18, 18, 18)
-        packing.setSpacing(14)
+        packing.setContentsMargins(18, 16, 18, 18)
+        packing.setSpacing(12)
         packing_heading = QLabel("Package details")
         packing_heading.setObjectName("shippingCardTitle")
         packing.addWidget(packing_heading)
@@ -317,7 +333,8 @@ class ShippingPage(QWidget):
         self.packages = QComboBox()
         self.packages.currentIndexChanged.connect(self._select_package)
         boxes.addWidget(self.packages, 1)
-        self.add_box = QPushButton("+ Box")
+        self.add_box = QPushButton("Add box")
+        theme.set_icon(self.add_box, "plus")
         self.add_box.clicked.connect(self.add_package)
         boxes.addWidget(self.add_box)
         self.remove_box = QPushButton("Remove")
@@ -365,9 +382,9 @@ class ShippingPage(QWidget):
         packing.addWidget(dimension_label)
         dimensions = QHBoxLayout()
         for key, label, example in (
-            ("length", "Length", "12"),
-            ("width", "Width", "8"),
-            ("height", "Height", "6"),
+            ("length", "Length", "in"),
+            ("width", "Width", "in"),
+            ("height", "Height", "in"),
         ):
             group = QVBoxLayout()
             label_widget = QLabel(label)
@@ -382,7 +399,8 @@ class ShippingPage(QWidget):
         self.items_card = QFrame()
         self.items_card.setObjectName("shippingCard")
         items_layout = QVBoxLayout(self.items_card)
-        items_layout.setContentsMargins(18, 16, 18, 16)
+        items_layout.setContentsMargins(18, 16, 18, 18)
+        items_layout.setSpacing(12)
         self.lots_label = QLabel("Items in this shipment")
         self.lots_label.setObjectName("shippingCardTitle")
         self.lots_label.setWordWrap(True)
@@ -400,8 +418,8 @@ class ShippingPage(QWidget):
         address_card.setObjectName("shippingCard")
         address_card.setMinimumWidth(250)
         address_layout = QVBoxLayout(address_card)
-        address_layout.setContentsMargins(16, 16, 16, 16)
-        address_layout.setSpacing(10)
+        address_layout.setContentsMargins(18, 16, 18, 18)
+        address_layout.setSpacing(12)
         address_header = QHBoxLayout()
         address_title = QLabel("Shipping address")
         address_title.setObjectName("shippingCardTitle")
@@ -472,15 +490,24 @@ class ShippingPage(QWidget):
         action_layout = QHBoxLayout(action_bar)
         action_layout.setContentsMargins(16, 10, 10, 10)
         action_layout.setSpacing(12)
+        action_text = QVBoxLayout()
+        action_text.setSpacing(2)
         self.validation = QLabel()
         self.validation.setObjectName("shippingCheck")
         self.validation.setTextFormat(Qt.TextFormat.PlainText)
         self.validation.setWordWrap(True)
-        action_layout.addWidget(self.validation, 1)
-        self.ready_next = QPushButton("Mark ready && next →")
+        action_text.addWidget(self.validation)
+        self.notice = QLabel("Your progress is saved automatically.")
+        self.notice.setObjectName("fieldHint")
+        self.notice.setWordWrap(True)
+        action_text.addWidget(self.notice)
+        action_layout.addLayout(action_text, 1)
+        self.ready_next = QPushButton("Mark ready && next")
         self.ready_next.setObjectName("primary")
         self.ready_next.setMinimumHeight(40)
         self.ready_next.setToolTip("Mark this box packed and move on. Shortcut: Return")
+        theme.set_icon(self.ready_next, "next", "accent_text")
+        self.ready_next.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.ready_next.clicked.connect(self._ready_and_next)
         action_layout.addWidget(self.ready_next)
         review_layout.addWidget(action_bar)
@@ -517,27 +544,7 @@ class ShippingPage(QWidget):
         )
         result_layout.addWidget(self.open_ship)
         layout.addWidget(self.export_result)
-        self.export_footer = QFrame()
-        self.export_footer.setObjectName("shippingFooter")
-        footer = QHBoxLayout(self.export_footer)
-        footer.setContentsMargins(16, 12, 14, 12)
-        footer.setSpacing(14)
-        footer_labels = QVBoxLayout()
-        footer_labels.setSpacing(2)
-        self.summary = QLabel()
-        self.summary.setWordWrap(True)
-        footer_labels.addWidget(self.summary)
-        self.notice = QLabel("Your progress is saved automatically.")
-        self.notice.setObjectName("hint")
-        self.notice.setWordWrap(True)
-        footer_labels.addWidget(self.notice)
-        footer.addLayout(footer_labels, 1)
-        self.export_button = QPushButton("Export to Pirate Ship…")
-        self.export_button.setObjectName("primary")
-        self.export_button.setMinimumHeight(42)
-        self.export_button.clicked.connect(self.export_report)
-        footer.addWidget(self.export_button)
-        layout.addWidget(self.export_footer)
+        layout.addWidget(self.export_result)
         fields = list(self.measurements.values())
         for previous, following in pairwise(fields):
             QWidget.setTabOrder(previous, following)
@@ -567,10 +574,7 @@ class ShippingPage(QWidget):
     @staticmethod
     def _set_state(widget, state):
         """Set the `state` property that styles.qss uses, and restyle."""
-        if widget.property("state") != state:
-            widget.setProperty("state", state)
-            widget.style().unpolish(widget)
-            widget.style().polish(widget)
+        theme.repolish(widget, state=state)
 
     @staticmethod
     def _dropped_csv(event):
@@ -796,6 +800,43 @@ class ShippingPage(QWidget):
         self._filter()
         self._fill_editor()
 
+    @staticmethod
+    def _attention(buyer) -> list[str]:
+        """Address and lot problems on boxes that can still change."""
+        errors = []
+        for package in buyer.packages:
+            if not package.exported_at:
+                for error in shipping.problems(
+                    buyer, package, include_measurements=False
+                ):
+                    if error not in errors:
+                        errors.append(error)
+        return errors
+
+    @classmethod
+    def _attention_label(cls, buyer) -> str:
+        """A short reason for the queue, e.g. "No street address +1"."""
+        errors = cls._attention(buyer)
+        if not errors:
+            return "Check details"
+        first = errors[0]
+        if first.startswith("Missing: "):
+            missing = first.removeprefix("Missing: ").split(", ")
+            short = {
+                shipping.FIELDS["name"]: "name",
+                shipping.FIELDS["address1"]: "street address",
+                shipping.FIELDS["zip"]: "postal code",
+                shipping.FIELDS["state"]: "state",
+            }
+            text = f"No {short.get(missing[0], missing[0].lower())}"
+            extra = len(missing) - 1 + len(errors) - 1
+        else:
+            text = {
+                "Country must be a two-letter code.": "Fix country code",
+            }.get(first, "Check lots")
+            extra = len(errors) - 1
+        return f"{text} +{extra}" if extra else text
+
     def _buyer_state(self, buyer):
         """One label and style state summarising all of a buyer's boxes."""
         statuses = {self._status(buyer, p) for p in buyer.packages}
@@ -804,7 +845,7 @@ class ShippingPage(QWidget):
         if buyer.pickup:
             return "Local pickup", "neutral"
         if statuses & {"Needs attention", "Check address / items"}:
-            return "Check details", "attention"
+            return self._attention_label(buyer), "attention"
         if statuses <= {"Ready", "Exported"}:
             return "Ready", "ready"
         return "To pack", "neutral"
@@ -831,8 +872,12 @@ class ShippingPage(QWidget):
         font = status.font()
         font.setBold(state in ("ready", "attention"))
         status.setFont(font)
+        tip = "\n".join(
+            [f"Bidder {buyer.id} · {buyer.email}"]
+            + (self._attention(buyer) if state == "attention" else [])
+        )
         for col, item in enumerate((name, status)):
-            item.setToolTip(f"Bidder {buyer.id} · {buyer.email}")
+            item.setToolTip(tip)
             self.buyers.setItem(row, col, item)
 
     def _filter(self, *_args):
@@ -1181,7 +1226,6 @@ class ShippingPage(QWidget):
         pending = self._pending_export_path()
         recoverable = pending is not None and pending.exists()
         self.export_button.setEnabled(count > 0 or recoverable)
-        self.export_footer.setVisible(self.batch is not None)
         self.queue_count.setText(str(len(self.batch.buyers)) if self.batch else "0")
         unit = "box" if count == 1 else "boxes"
         self.export_button.setText(
@@ -1226,13 +1270,13 @@ class ShippingPage(QWidget):
         )
         if self.batch:
             pickup = sum(b.pickup for b in self.batch.buyers)
-            self.summary.setText(
+            self.progress_label.setToolTip(
                 f"{strings.count(len(self.batch.buyers), 'buyer')} · "
                 f"{count} ready to export · {exported} exported · "
                 f"{strings.count(pickup, 'local pickup')}"
             )
         else:
-            self.summary.clear()
+            self.progress_label.setToolTip("")
 
     def flush(self, *, warn=True) -> bool:
         if self.busy:

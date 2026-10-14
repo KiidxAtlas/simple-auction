@@ -23,7 +23,7 @@ from simple_auction.ui.background import run_io
 class NetworkSettings(QFrame):
     def __init__(self, settings: network.Sharing, parent=None):
         super().__init__(parent)
-        self.setObjectName("shippingCard")
+        self.setObjectName("settingsSection")
         self.identity = settings.share_id
         self._host_code = (
             settings.code
@@ -32,8 +32,10 @@ class NetworkSettings(QFrame):
         )
         self._join_code = settings.code if settings.mode == "join" else ""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(10)
         title = QLabel("Local network sharing")
-        title.setObjectName("shippingCardTitle")
+        title.setObjectName("settingsSectionTitle")
         layout.addWidget(title)
         hint = QLabel(
             "Share auctions, photos, and shipping on the same private network. The host must stay awake with Simple Auction open. No internet or cloud account is needed."
@@ -49,6 +51,9 @@ class NetworkSettings(QFrame):
         layout.addWidget(self.host_toggle)
         self.host_panel = QFrame()
         host_layout = QFormLayout(self.host_panel)
+        host_layout.setContentsMargins(0, 6, 0, 0)
+        host_layout.setVerticalSpacing(10)
+        host_layout.setHorizontalSpacing(14)
         self.port = QLineEdit(str(settings.port))
         self.port.setValidator(QIntValidator(1024, 65535, self.port))
         host_layout.addRow("Host port", self.port)
@@ -86,6 +91,9 @@ class NetworkSettings(QFrame):
         layout.addWidget(self.host_panel)
         self.join_panel = QFrame()
         join_layout = QFormLayout(self.join_panel)
+        join_layout.setContentsMargins(0, 6, 0, 0)
+        join_layout.setVerticalSpacing(10)
+        join_layout.setHorizontalSpacing(14)
         self.address = QLineEdit(settings.address)
         self.address.setPlaceholderText("192.168.1.20:8765")
         self.address.textEdited.connect(lambda: setattr(self, "identity", ""))

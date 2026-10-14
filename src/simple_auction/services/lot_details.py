@@ -1,13 +1,26 @@
-"""Lot fields that aren't Excel columns (make, model), in a side file per
-auction next to its workbook: "41000 details.json"."""
+"""Lot fields that aren't Excel columns, in a side file per auction."""
 
 import json
 from pathlib import Path
 
 from simple_auction.models import Lot
 from simple_auction.services import storage
+from simple_auction.services.title_layout import validate, validate_values
 
-_FIELDS = ("make", "model")
+_DEFAULTS = {
+    "make": "",
+    "model": "",
+    "barrel_length": "",
+    "caliber": "",
+    "gun_type": "",
+    "ca_legality": "N/A",
+    "c_and_r": False,
+    "title_fields": None,
+    "custom": {},
+}
+_FIELDS = tuple(_DEFAULTS)
+_STRUCTURED = {"title_fields", "custom"}
+_FLAGS = {"c_and_r"}  # true/false values
 
 
 def details_path(folder: Path, auction_no: int) -> Path:
@@ -18,7 +31,7 @@ class DetailsFileError(ValueError):
     """The details file cannot safely be read or overwritten."""
 
 
-def _read(path: Path) -> dict[str, dict[str, str]]:
+def _read(path: Path) -> dict[str, dict]:
     if not path.exists():
         return {}
     try:
@@ -30,12 +43,24 @@ def _read(path: Path) -> dict[str, dict[str, str]]:
     if not isinstance(data, dict) or any(
         not isinstance(key, str)
         or not isinstance(entry, dict)
-        or any(not isinstance(value, str) for value in entry.values())
+        or any(
+            not isinstance(value, bool if name in _FLAGS else str)
+            for name, value in entry.items()
+            if name not in _STRUCTURED
+        )
         for key, entry in data.items()
     ):
         raise DetailsFileError(
             f"Invalid details in {path}. The file was not overwritten."
         )
+    try:
+        for entry in data.values():
+            if "title_fields" in entry:
+                validate(entry["title_fields"])
+            if "custom" in entry:
+                validate_values(entry["custom"])
+    except ValueError as e:
+        raise DetailsFileError(f"Invalid title layout in {path}: {e}") from e
     return data
 
 
@@ -52,7 +77,11 @@ def prepare(path: Path, lots: list[Lot]) -> bytes:
     """Validate and encode updates without modifying the sidecar."""
     data = _read(path)
     for lot in lots:
-        entry = {name: getattr(lot, name) for name in _FIELDS if getattr(lot, name)}
+        entry = {
+            name: getattr(lot, name)
+            for name in _FIELDS
+            if getattr(lot, name) != _DEFAULTS[name]
+        }
         if entry:
             data[str(lot.lot_number)] = entry
         else:
@@ -72,7 +101,8 @@ def fill(path: Path, lots: list[Lot]) -> None:
     data = _read(path)
     for lot in lots:
         for name in _FIELDS:
-            setattr(lot, name, str(data.get(str(lot.lot_number), {}).get(name, "")))
+            value = data.get(str(lot.lot_number), {}).get(name, _DEFAULTS[name])
+            setattr(lot, name, dict(value) if name == "custom" else value)
 
 
 def save(path: Path, lot: Lot) -> None:

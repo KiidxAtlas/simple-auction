@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.7 — 2026-10-14
+
+### Added
+
+- C&R eligible checkbox in the Listing card. When ticked, "C&R ELIGIBLE"
+  is added to the end of the title, and it's removed again when unticked.
+  It's part of the default title layout and can be moved or switched off
+  in Settings → Listing fields. A saved layout that matches the previous
+  default picks it up automatically.
+- The blank choice in the Type list now reads "None". Picking it still
+  leaves the field empty.
+
+### Changed
+
+- Lot editor: Identification and Specs are one card, with up to three short
+  fields to a row. CA legality sits next to Condition above the title. The
+  description grows to fill the window, so a whole lot fits on one screen at
+  1280×800 without scrolling.
+- Refreshed look: an app mark in the top bar, softer palette and borders,
+  raised cards, and an accent marker on the open lot in the sidebar.
+- Research panel: a clearer empty state with a single Auto-fill button.
+
 ## 0.1.6 — 2026-10-13
 
 ### Fixed
