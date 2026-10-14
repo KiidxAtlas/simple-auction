@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Settings → Listing fields no longer gets wider than the window with wide
+  system fonts; long field labels wrap.
+
 ## 0.1.7 — 2026-10-14
 
 ### Added

@@ -98,6 +98,8 @@ class ListEditor(QWidget):
                 form_layout.addSpacing(8)
             label = QLabel(field.label)
             label.setObjectName("fieldLabel")
+            # Long labels wrap rather than widening the page on wide fonts.
+            label.setWordWrap(True)
             if field.multiline:
                 edit = QPlainTextEdit()
                 edit.setTabChangesFocus(True)
