@@ -111,3 +111,34 @@ def test_names_capitalize_on_finish_and_autosave_before_focus_changes(window):
     assert form.make.text() == "Sig Sauer"
     assert form.model.text() == "P320 Xfive"
     assert form.title.text().count("Sig Sauer") == 1
+
+
+@pytest.mark.parametrize("condition", ["Good", "Excellent"])
+def test_explicit_condition_selection_restores_deleted_wording(window, condition):
+    form = window.form
+    form.make.setText("Remington")
+    form.condition.setCurrentText("Good")
+    form._apply_title_fields()
+    form.title.setText("Remington My own title")
+    form.desc.setPlainText("Only my own description.")
+    form.title.editingFinished.emit()
+    assert form.title.text() == "Remington My own title"
+    assert form.desc.toPlainText() == "Only my own description."
+    index = form.condition.findText(condition)
+    form.condition.setCurrentIndex(index)
+    form.condition.activated.emit(index)
+    expected_title = f"{condition} Condition"
+    expected_desc = f"Condition: {condition}."
+    assert expected_title in form.title.text()
+    assert expected_desc in form.desc.toPlainText()
+    assert "My own title" in form.title.text()
+    assert "Only my own description." in form.desc.toPlainText()
+    form.condition.activated.emit(index)
+    assert form.title.text().count(expected_title) == 1
+    assert form.desc.toPlainText().count(expected_desc) == 1
+    assert window.flush()
+    auction, number = window.auction_no, window.lot_no
+    window.create_lot(auction)
+    window.open_lot(auction, number)
+    assert expected_title in form.title.text()
+    assert expected_desc in form.desc.toPlainText()

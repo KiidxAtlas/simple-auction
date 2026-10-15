@@ -345,6 +345,7 @@ def update_title(
     prefix_for: dict[str, str] | None = None,
     old_prefix_for: dict[str, str] | None = None,
     max_length: int = TITLE_MAX_LENGTH,
+    restore_fields: tuple[str, ...] = (),
 ) -> str:
     """Replace only generated parts, retaining the user's words in between.
 
@@ -354,6 +355,8 @@ def update_title(
     their value; `old_prefix_for` is what the current title was built with
     (defaults to `prefix_for`). Titles in the older style ("S/N:", a dash
     before the condition) are recognised and rewritten in the current one.
+    `restore_fields` explicitly restores selected deleted parts without affecting
+    the deletion-preserving behavior of other fields.
     """
     prefix_for = prefix_for or {}
     old_prefix_for = prefix_for if old_prefix_for is None else old_prefix_for
@@ -379,6 +382,7 @@ def update_title(
             and key not in found
             and key in old_layout
             and field_text(old, key) == field_text(new, key)
+            and key not in restore_fields
         ):
             return ""
         return text

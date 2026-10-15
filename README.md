@@ -87,6 +87,9 @@ reopening the lot. Changing the condition replaces only recognised generated
 wording; unfamiliar or manually edited text is retained rather than discarded.
 Deleted or partially edited generated description lines are not rebuilt when
 their source fields change. Intact generated lines can still update normally.
+Explicitly selecting a condition restores its generated title wording and
+description sentence, even if you select the same condition again after deleting
+them. Saving, reopening, or finishing an unrelated edit does not restore deletions.
 Make and model entries capitalize word initials: `remington` becomes `Remington`
 and `sig sauer` becomes `Sig Sauer`. Existing capitalization in model codes such
 as `AR-15` and `M&P` is kept, and serial numbers are not reformatted.
@@ -96,7 +99,7 @@ windows, with Photos below Identification, and stacks the cards on narrow ones.
 **Consignment** is expanded by default for owner and book number. **C&R** is
 always visible in Identification, and **CA legality** sits beside Condition in
 Listing. Collapsing Consignment never clears its fields. Serial lookup
-sources stay visible below the serial field. **Photo tools**
+sources appear below the serial field once a serial is entered. **Photo tools**
 beside Add photos includes phone intake; evidence and publication review remain
 in the lot's **⋯** menu. Duplicate warnings still appear when relevant.
 Scrolling over a closed dropdown scrolls the page rather than changing the
@@ -129,8 +132,9 @@ This is spelling assistance, not grammar checking or automatic rewriting.
 
 ## Identification, research and publication review
 
-- Serial lookup links appear directly below the serial field, without a menu or
-  disclosure button. **Colt**, **Ruger**, **Browning**, and Lindcott are defaults;
+- Once a serial is entered, lookup links appear directly below its field and are
+  clickable without a menu or disclosure button. Clearing the serial hides them.
+  **Colt**, **Ruger**, **Browning**, and Lindcott are defaults;
   every link can be edited, reordered or removed in Settings → Auction setup →
   Serial number lookup sites. Older settings receive the formerly hard-coded
   sites once; saved removals are respected. Cody and Colt Archives are not included.

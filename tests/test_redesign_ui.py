@@ -188,7 +188,7 @@ def test_consignment_disclosure_keeps_values_and_legality_controls_stay_visible(
     assert form.ca_legality.isVisible()
     assert form.identification_card.isAncestorOf(form.c_and_r)
     assert form.listing_card.isAncestorOf(form.ca_legality)
-    assert form.serial_tools.isVisible()
+    assert form.serial_tools.isHidden()
     form.consignment.set_expanded(False)
     form.consignment.toggle.setFocus()
     QTest.keyClick(form.consignment.toggle, Qt.Key.Key_Space)
@@ -214,7 +214,7 @@ def test_consignment_disclosure_keeps_values_and_legality_controls_stay_visible(
     form.deleteLater()
 
 
-def test_serial_sources_are_always_visible_without_copy_button(app):
+def test_serial_sources_show_for_serial_without_copy_button(app, monkeypatch):
     form = LotForm()
     from simple_auction.services.serial_links import DEFAULT_LINKS
 
@@ -222,12 +222,18 @@ def test_serial_sources_are_always_visible_without_copy_button(app):
     form.load(Lot(1), 1000)
     form.show()
     app.processEvents()
-    assert form.serial_tools.isVisible()
-    assert all(
-        button.isVisible() and not button.isEnabled()
-        for button, _link in form._link_buttons
+    assert form.serial_tools.isHidden()
+    opened = []
+    monkeypatch.setattr(
+        "simple_auction.ui.components.lot_form.QDesktopServices.openUrl",
+        lambda url: opened.append(bytes(url.toEncoded()).decode("ascii")) or True,
     )
     form.serial.setText("A123")
+    assert form.serial_tools.isVisible()
+    for button, _link in form._link_buttons:
+        button.click()
+    assert len(opened) == len(form._link_buttons)
+    assert any("serial=A123" in url for url in opened)
     assert all(
         button.isVisible() and button.isEnabled()
         for button, _link in form._link_buttons
@@ -239,7 +245,7 @@ def test_serial_sources_are_always_visible_without_copy_button(app):
         for button in form.serial_tools.findChildren(QPushButton)
     )
     form.serial.clear()
-    assert form.serial_tools.isVisible()
+    assert form.serial_tools.isHidden()
     assert all(not button.isEnabled() for button, _link in form._link_buttons)
     form.close()
     form.deleteLater()

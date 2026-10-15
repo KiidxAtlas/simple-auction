@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.10 — 2026-10-15
+
+### Fixed
+
+- Explicitly reselecting a condition restores deleted generated wording without
+  restoring other deleted fields during saving or passive editing.
+- Serial lookup links appear only when a serial is entered, and remain directly
+  clickable without a disclosure button.
+
 ## 0.1.9 — 2026-10-15
 
 ### Added

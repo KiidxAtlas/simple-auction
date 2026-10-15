@@ -577,7 +577,9 @@ class LotForm(QWidget):
         # Listing: condition and CA legality stay side by side above the title.
         self.condition = QComboBox()
         self.condition.setPlaceholderText(strings.PICK_CONDITION)
-        self.condition.activated.connect(self._apply_condition)
+        self.condition.activated.connect(
+            lambda _index: self._apply_condition(restore=True)
+        )
         self.ca_legality = QComboBox()
         for value in CA_LEGALITY:
             self.ca_legality.addItem(CA_TITLE_TEXT.get(value, value), value)
@@ -1146,13 +1148,13 @@ class LotForm(QWidget):
             self.title_count.style().unpolish(self.title_count)
             self.title_count.style().polish(self.title_count)
 
-    def _apply_condition(self) -> None:
+    def _apply_condition(self, *, restore: bool = False) -> None:
         """Keep the title's generated parts and the description's condition
         sentence in sync with the fields.
 
         Runs when a condition is picked, when the title is finished, and on load,
-        so the text shows up immediately rather than on save. Generated text
-        the user deleted stays deleted until the value it shows changes.
+        so the text shows up immediately rather than on save. Explicitly picking
+        a condition restores its wording; passive synchronization preserves edits.
         """
         if self._lot is None or self._loading:
             return
@@ -1167,6 +1169,7 @@ class LotForm(QWidget):
             self._title_fields,
             self._prefixes,
             self._applied_prefixes,
+            restore_fields=("condition",) if restore else (),
         )
         self._applied_title_lot = current
         self._applied_prefixes = dict(self._prefixes)
@@ -1174,9 +1177,8 @@ class LotForm(QWidget):
             self.title.setText(title)
         option = find_option(self._conditions, condition)
         text = self.desc.toPlainText()
-        # Never rewrite user edits just because a title field finished editing
-        # or the lot reopened. Refresh only a changed condition or changed
-        # configured wording, and preserve a condition line the user deleted.
+        # Passive updates preserve user edits; selecting a condition explicitly
+        # opts back into its generated wording, even when the value is unchanged.
         note = option.note if option else ""
         previous = f"Condition: {self._applied_condition}. {self._applied_condition_note}".strip()
         owns_condition = bool(self._applied_condition) and any(
@@ -1184,7 +1186,8 @@ class LotForm(QWidget):
             for line in text.splitlines()
         )
         if (option is not None or not condition) and (
-            (not self._applied_condition and condition)
+            restore
+            or (not self._applied_condition and condition)
             or (
                 owns_condition
                 and (
@@ -1270,7 +1273,7 @@ class LotForm(QWidget):
     def _update_lookup_row(self, *_args) -> None:
         """Lookup buttons work once there's a serial; the hint shows results."""
         has_serial = bool(self.serial.text().strip())
-        self.serial_tools.setVisible(True)
+        self.serial_tools.setVisible(has_serial)
         for button, link in self._link_buttons:
             button.setEnabled(has_serial)
             button.setToolTip(
