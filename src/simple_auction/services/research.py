@@ -10,6 +10,7 @@ import logging
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from google import genai
 
@@ -32,28 +33,80 @@ details are given in <lot_details> tags, and staff may update them during the \
 conversation. Photos of the lot may be attached; use them to identify the \
 item and read markings, and say when a photo is unclear.
 
-When asked to research the lot, give a briefing a cataloguer can use: what the \
-item is (maker, model, variant), when and where it was made, including what \
-the serial number indicates about the date of manufacture if that can be \
-determined, notable history or variants, the features that drive collector \
-value, a realistic auction value range with recent comparable sales where you \
-can find them, and what to verify in person (markings, matching numbers, \
-originality). Answer follow-up questions directly.
+When asked to research the lot, give a brief catalogue note, not a full report. \
+Aim for 120–180 words, with at most three short sections: Identification, \
+Key facts, and Verify next. Prioritize maker/model/variant, supported dating \
+(including serial evidence when available), and the most useful checks for \
+staff. Include only relevant history or collector features. Do not include \
+comparable sales, prices, or a long history unless explicitly requested. \
+Do not automatically appraise the lot. Distinguish sold results from asking \
+prices whenever discussing sales.
+
+Answer follow-up questions directly, usually in under 100 words. Give a longer \
+answer when staff explicitly ask for detail or when needed to preserve \
+important uncertainty, conflicting evidence, or safety caveats. Brevity must \
+never turn an uncertain identification or date into a confident claim.
 
 Use Google Search to check facts, preferring manufacturer records, collector \
 references and auction results. Say plainly when something is uncertain or \
-can't be confirmed, rather than guessing. Keep answers skimmable with short \
-headings or bullet points, and don't repeat the lot details back."""
+can't be confirmed, rather than guessing. Use short headings and bullets; \
+don't repeat the lot details back."""
 
-RESEARCH_REQUEST = "Research this lot for the catalogue."
+RESEARCH_REQUEST = (
+    "Give a brief catalogue research note for this lot: identification, "
+    "key facts, and what staff should verify next."
+)
+
+COMPARABLES_REQUEST = """\
+Find comparable auction sales and listings using only the supplied item details.
+Do not search for or infer a serial number. Clearly label each result Sold or
+Asking (never treat an asking price as a completed sale). Include source URL,
+sale date, price, currency, whether buyer premium is included, condition and
+important differences. Say unknown when evidence is missing. Do not appraise
+this lot, calculate a valuation, or change catalogue fields. Staff must verify
+sources and manually record comparables before using them."""
+
+
+def comparable_lot(lot: Lot) -> Lot:
+    """Allowlisted search context, excluding serials, free text and photos."""
+    return Lot(
+        lot_number=lot.lot_number,
+        make=lot.make,
+        model=lot.model,
+        caliber=lot.caliber,
+        gun_type=lot.gun_type,
+        year=lot.year,
+        condition=lot.condition,
+        barrel_length=lot.barrel_length,
+    )
+
+
+def safe_source_url(url: str) -> bool:
+    """Only ordinary HTTP(S) source links may leave the research viewer."""
+    if not isinstance(url, str) or any(c.isspace() or ord(c) < 32 for c in url):
+        return False
+    try:
+        parsed = urlsplit(url)
+        return bool(
+            parsed.scheme.lower() in {"http", "https"}
+            and parsed.hostname
+            and not parsed.username
+            and not parsed.password
+            and "\\" not in url
+            and parsed.port != 0
+        )
+    except ValueError:
+        return False
+
 
 AUTOFILL_REQUEST = """\
 Suggest catalogue values for this lot's fields, as JSON matching the schema. \
 Use the lot details, the photos and what you've found in this conversation. \
 Fill a field only when the details, the photos or reliable sources support it; \
 otherwise leave it as an empty string. Never invent serial numbers: give one \
-only if it is legible in a photo. Give years as four digits and lengths with \
-their units (e.g. 26 inches)."""
+only if it is legible in a photo. Never resolve ambiguous O/0, I/1 or S/5 \
+markings by guessing: omit uncertain fields for human review. Give years as \
+four digits and lengths with their units (e.g. 26 inches)."""
 
 # Fields auto-fill may suggest: (Lot attribute, label, guidance for Gemini).
 AUTOFILL_FIELDS = [
@@ -392,7 +445,9 @@ class _Response:
                     return Event("text", delta.text)
                 if delta.type == "text_annotation_delta":
                     for a in delta.annotations or []:
-                        if getattr(a, "type", None) == "url_citation" and a.url:
+                        if getattr(
+                            a, "type", None
+                        ) == "url_citation" and safe_source_url(a.url):
                             self.sources.setdefault(a.url, a.title or a.url)
             case "interaction.completed":
                 self.status = event.interaction.status

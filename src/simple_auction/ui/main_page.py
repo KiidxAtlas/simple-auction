@@ -1,6 +1,5 @@
 import csv
 import logging
-import shutil
 import subprocess
 from collections import defaultdict
 from dataclasses import replace
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSplitter,
@@ -38,6 +38,7 @@ from simple_auction.models import Lot
 from simple_auction.services import (
     api_key,
     catalogue,
+    dossier,
     excel,
     importer,
     lookup,
@@ -90,6 +91,8 @@ class MainPage(QMainWindow):
         self._io_busy = False
         self._save_error: Exception | None = None
         self._catalogue_cache = catalogue.Cache()
+        self._catalogue_lots: dict[int, list[Lot]] = {}
+        self._phone_imports = []  # retain temporary images until a successful save
 
         self.setWindowTitle(APP_NAME)
         self.resize(*theme.WINDOW_SIZE)
@@ -156,6 +159,11 @@ class MainPage(QMainWindow):
         self.form.research_toggled.connect(self.research.setVisible)
         self.research.closed.connect(self._close_research)
         self.research.apply_requested.connect(self.form.apply_autofill)
+        self.research.packet_saved.connect(self._save_research_record)
+        self.form.evidence_requested.connect(self.open_evidence)
+        self.form.phone_requested.connect(self.phone_intake)
+        self.form.duplicates_requested.connect(self.review_duplicates)
+        self.form.changed.connect(self._review_current)
 
         # The installed (Windows) app updates from release installers; a copy
         # run from a git checkout (e.g. on a Mac) updates by pulling commits.
@@ -237,6 +245,13 @@ class MainPage(QMainWindow):
         theme.set_icon(self.reload_shared_button, "refresh")
         self.reload_shared_button.clicked.connect(self.reload_shared)
         layout.addWidget(self.reload_shared_button)
+        tools = QPushButton("Tools")
+        tools_menu = QMenu(tools)
+        tools_menu.addAction("Ready to publish — work queue…", self.open_work_queue)
+        tools_menu.addAction("Back up / restore…", self.backup_restore)
+        tools_menu.addAction("Consignor review sheets…", self.review_sheets)
+        tools.setMenu(tools_menu)
+        layout.addWidget(tools)
         settings_button = QPushButton(strings.SETTINGS_BTN)
         theme.set_icon(settings_button, "settings")
         settings_button.clicked.connect(self.open_settings)
@@ -319,6 +334,7 @@ class MainPage(QMainWindow):
             return auctions, errors
 
         auctions, errors = self._io(strings.IO_LOADING, load_all)
+        self._catalogue_lots = auctions
         self.sidebar.populate(auctions)
         self._update_navigation()
         for no, error in errors:
@@ -386,6 +402,7 @@ class MainPage(QMainWindow):
                 self._shared_base = record
         self.auction_no, self.lot_no = auction_no, lot.lot_number
         self.form.load(lot, auction_no)
+        self._review_current()
         self._update_navigation()
 
     def _update_navigation(self) -> None:
@@ -477,6 +494,13 @@ class MainPage(QMainWindow):
         else:
             self._autosave.start(AUTOSAVE_MS)
         self.sidebar.update_lot(auction_no, lot)
+        self._catalogue_lots.setdefault(auction_no, [])
+        self._catalogue_lots[auction_no] = [
+            lot if old.lot_number == lot.lot_number else old
+            for old in self._catalogue_lots[auction_no]
+        ]
+        self._review_current()
+        self._release_phone_imports()
         self._recycle(removed, images)
         return True
 
@@ -821,7 +845,7 @@ class MainPage(QMainWindow):
 
                 self._io("Exporting shared auction…", shared_export)
             else:
-                shutil.copy2(self._path(auction_no), dest)
+                excel.export_auction(self._path(auction_no), Path(dest))
         except OSError, network.NetworkError:
             log.exception("Exporting auction %s failed", auction_no)
             QMessageBox.critical(self, strings.EXPORT, strings.EXPORT_FAILED)
@@ -1020,11 +1044,25 @@ class MainPage(QMainWindow):
                 self.config.conditions = conditions
                 self.config.save_conditions()
             chosen_dark = dialog.dark_mode()
-            replace(self.config, dark_mode=chosen_dark, sharing=chosen_sharing).save()
+            chosen_dyslexic, chosen_size = dialog.dyslexic_font(), dialog.font_size()
+            replace(
+                self.config,
+                dark_mode=chosen_dark,
+                dyslexic_font=chosen_dyslexic,
+                font_size=chosen_size,
+                sharing=chosen_sharing,
+            ).save()
             self.config.dark_mode = chosen_dark
+            self.config.dyslexic_font = chosen_dyslexic
+            self.config.font_size = chosen_size
             self.config.sharing = chosen_sharing
             self._configure_sharing()
-            theme.apply(QApplication.instance(), dark_mode=chosen_dark)
+            theme.apply(
+                QApplication.instance(),
+                dark_mode=chosen_dark,
+                dyslexic_font=chosen_dyslexic,
+                font_size=chosen_size,
+            )
             self._watch_conditions()
             self.form.set_serial_links(self.config.serial_links)
             self.form.set_conditions(self.config.conditions)
@@ -1231,6 +1269,7 @@ class MainPage(QMainWindow):
                 for a, lots in snapshot["auctions"].items()
             }
             self.sidebar.populate(auctions)
+            self._catalogue_lots = auctions
             self._update_navigation()
             if self.auction_no is not None and self.lot_no is not None:
                 self.sidebar.select(self.auction_no, self.lot_no)
@@ -1439,3 +1478,197 @@ class MainPage(QMainWindow):
             self.shipping.notice.setText(
                 "Unsaved edits preserved. Reconnect and save again."
             )
+
+    # -- evidence, publication and intake -----------------------------------
+
+    def _save_research_record(self, record: dict) -> None:
+        try:
+            self.form.add_research(record)
+        except ValueError as error:
+            QMessageBox.warning(self, "Research packet", str(error))
+            return
+        if self.flush():
+            self._status("Research answer saved to this lot's packet")
+        else:
+            self._save_warning()
+
+    def _review_current(self) -> None:
+        lot = self.form.current_lot()
+        matches = (
+            dossier.duplicates(lot, self.auction_no, self._catalogue_lots)
+            if lot is not None
+            else []
+        )
+        self.form.set_duplicates(len(matches))
+
+    def open_evidence(self) -> None:
+        from simple_auction.ui.dossier_dialog import DossierDialog
+
+        lot = self.form.current_lot()
+        if lot is None:
+            return
+        dialog = DossierDialog(lot, self)
+        if dialog.exec():
+            self.form.set_dossier(dialog.packet)
+            if not self.flush():
+                self._save_warning()
+
+    def _workflow_catalogue(self) -> dict[int, list[Lot]]:
+        """Read the source of truth, including photos, for review/export."""
+
+        def load():
+            if self.shared:
+                snapshot = self._client().snapshot()
+                return {
+                    int(auction): [
+                        self._client().materialize(record) for record in records
+                    ]
+                    for auction, records in snapshot["auctions"].items()
+                }
+            auctions = {}
+            for auction in excel.list_auctions(self.config.auctions_dir):
+                lots = self._catalogue_cache.load(
+                    self._path(auction), self._details(auction)
+                )
+                for lot in lots:
+                    lot.photos = lot_photo_files(
+                        lot.lot_number, self._images_dir(auction)
+                    )
+                auctions[auction] = lots
+            return auctions
+
+        return self._io("Preparing catalogue review…", load)
+
+    def open_work_queue(self) -> None:
+        from simple_auction.ui.workflow_dialogs import WorkQueueDialog
+
+        if not self._leave_lot():
+            return
+        try:
+            auctions = self._workflow_catalogue()
+        except (OSError, ValueError, network.NetworkError) as error:
+            QMessageBox.warning(self, "Work queue", str(error))
+            return
+        self._catalogue_lots = auctions
+        dialog = WorkQueueDialog(auctions, self)
+        if dialog.exec() and dialog.target:
+            auction, number, target = dialog.target
+            self.show_workspace(shipping=False)
+            if self.pages.currentWidget() is not self.splitter:
+                return
+            self.open_lot(auction, number)
+            if (self.auction_no, self.lot_no) == (auction, number):
+                self.sidebar.select(auction, number)
+                self.form.focus_issue(target)
+
+    def review_duplicates(self) -> None:
+        from simple_auction.ui.workflow_dialogs import DuplicateDialog
+
+        lot = self.form.current_lot()
+        if lot is None or not self._leave_lot():
+            return
+        matches = dossier.duplicates(lot, self.auction_no, self._catalogue_lots)
+        dialog = DuplicateDialog(matches, self)
+        if not dialog.exec() or not dialog.target:
+            return
+        auction, earlier = dialog.target
+        if dialog.choice == "open":
+            self.open_lot(auction, earlier.lot_number)
+            self.sidebar.select(auction, earlier.lot_number)
+            return
+        packet = dossier.validate(lot.dossier)
+        if dialog.choice == "reuse":
+            old = dossier.validate(earlier.dossier)
+            for key in ("findings", "research", "comparables"):
+                for record in old[key]:
+                    if record not in packet[key]:
+                        packet[key].append(record)
+            packet["relisted_from"] = f"Auction {auction} / Lot {earlier.lot_number}"
+            packet["status"] = "Unverified"
+            packet["review_approved"] = False
+            packet["research_complete"] = False
+        packet["duplicate_notes"] = dialog.explanation
+        try:
+            self.form.set_dossier(packet)
+        except ValueError as error:
+            QMessageBox.warning(self, "Duplicate review", str(error))
+            return
+        if not self.flush():
+            self._save_warning()
+
+    def phone_intake(self) -> None:
+        from simple_auction.ui.phone_capture_dialog import PhoneCaptureDialog
+
+        if self.lot_no is None or not self._leave_lot():
+            return
+        dialog = PhoneCaptureDialog(self.lot_no, self)
+        if dialog.exec():
+            self._phone_imports.append(dialog)
+            self.form.add_photos(dialog.photos)
+            if not self.flush():
+                self._save_warning()
+        else:
+            dialog.deleteLater()
+
+    def _release_phone_imports(self) -> None:
+        current = self.form.current_lot()
+        paths = set(current.photos) if current else set()
+        pending = []
+        for dialog in self._phone_imports:
+            if paths.intersection(dialog.photos):
+                pending.append(dialog)
+            else:
+                dialog.cleanup_photos()
+                dialog.deleteLater()
+        self._phone_imports = pending
+
+    def backup_restore(self) -> None:
+        from simple_auction.ui.backup_dialog import BackupDialog
+
+        if not self._leave_lot() or not self.shipping.flush():
+            return
+        database = (
+            self.host.db
+            if self.host
+            else self.client.db
+            if isinstance(self.client, network.LocalClient)
+            else None
+        )
+        remote = self.config.sharing.mode == "join"
+        dialog = BackupDialog(
+            self.config, database=database, remote_client=remote, parent=self
+        )
+        dialog.exec()
+        if dialog.activation_requested:
+            # Settings now point at the isolated restored copy. Do not allow
+            # further edits to the old catalogue in this process.
+            self.close()
+
+    def review_sheets(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        from simple_auction.ui.review_sheet_dialog import ReviewSheetDialog
+
+        if not self._leave_lot() or not self.shipping.flush():
+            return
+        try:
+            auctions = self._workflow_catalogue()
+        except (OSError, ValueError, network.NetworkError) as error:
+            QMessageBox.warning(self, "Consignor review", str(error))
+            return
+        if not auctions:
+            self._status("No auctions to export")
+            return
+        numbers = sorted(auctions)
+        selected = numbers.index(self.auction_no) if self.auction_no in numbers else 0
+        text, accepted = QInputDialog.getItem(
+            self,
+            "Consignor review sheets",
+            "Auction",
+            [str(number) for number in numbers],
+            selected,
+            False,
+        )
+        if accepted:
+            auction = int(text)
+            ReviewSheetDialog(auction, auctions[auction], self).exec()

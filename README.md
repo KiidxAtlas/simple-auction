@@ -31,6 +31,11 @@ Export and Delete; the sidebar list can also be used with the keyboard (arrows,
 Return to open or close an auction). On narrow windows the editor reflows into one
 column instead of cutting fields off.
 
+Auction workbooks and Excel exports use **Lot Number, Title, Description, Owner,
+Book Number, Serial, Condition, Year**, in that order. Older app workbooks still
+load correctly and are reordered when saved or exported; exporting does not
+rewrite the source workbook. Existing lot values are retained.
+
 Settings lists its sections on the left. **Auction setup** has the next auction
 number, the serial-number lookup sites and the serial table. **Conditions** lists
 the dropdown choices; select one to edit its name and description sentence on the
@@ -55,22 +60,169 @@ sections; **Cancel** discards pending changes.
 
 The lot editor includes **Caliber**, **Type** (Rifle, Shotgun or Handgun, or type
 your own), optional **Barrel length** (enter the units with the value) and **CA
-legality**: **Legal for CA**, **Not CA legal**, or **N/A** (the default). These are
+legality**: **LEGAL FOR CA**, **NOT LEGAL FOR CA**, or **N/A** (the default). These are
 saved with make/model in the lot-details file (or shared database), not as
 additional Excel columns, and can be imported from spreadsheet columns such as
 "Caliber"/"Gauge" and "Type".
 
 Titles follow the house style by default:
-`Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition OK FOR CA`
+`Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition LEGAL FOR CA`
 (make, model, caliber, type, your own wording, `SN:` serial, condition followed by
-"Condition", then `OK FOR CA` / `NOT CA LEGAL`; N/A adds nothing). The description
+"Condition", then `LEGAL FOR CA` / `NOT LEGAL FOR CA`; N/A adds nothing). The description
 starts with Make, Model, Caliber and Type lines. Settings saved with the previous
 built-in title layout switch to this one automatically; a layout you changed is
 kept. Titles written in the older style ("S/N:", " - Good") are recognised and
 rewritten in the new style when the lot is opened.
 
+When a title is wider than its field, a horizontal scrollbar appears underneath.
+Drag it, scroll sideways on a trackpad, or hold **Shift** while using the mouse
+wheel to see the hidden words. Panning does not move the caret or change the
+text or selection. Normal vertical scrolling still scrolls the page; keyboard
+navigation and Undo continue to work, and the existing title-length limit stays
+the same.
+
+You can add your own description text after the condition sentence, either on
+the same line or in following paragraphs. It stays in place when saving and
+reopening the lot. Changing the condition replaces only recognised generated
+wording; unfamiliar or manually edited text is retained rather than discarded.
+Deleted or partially edited generated description lines are not rebuilt when
+their source fields change. Intact generated lines can still update normally.
+Make and model entries capitalize word initials: `remington` becomes `Remington`
+and `sig sauer` becomes `Sig Sauer`. Existing capitalization in model codes such
+as `AR-15` and `M&P` is kept, and serial numbers are not reformatted.
+
+The lot editor aligns Identification and Listing in equal-sized cards on wide
+windows, with Photos below Identification, and stacks the cards on narrow ones.
+**Consignment** is expanded by default for owner and book number. **C&R** is
+always visible in Identification, and **CA legality** sits beside Condition in
+Listing. Collapsing Consignment never clears its fields. Serial lookup
+sources stay visible below the serial field. **Photo tools**
+beside Add photos includes phone intake; evidence and publication review remain
+in the lot's **⋯** menu. Duplicate warnings still appear when relevant.
+Scrolling over a closed dropdown scrolls the page rather than changing the
+selected value. Click to open the dropdown when you want to choose an option;
+normal keyboard navigation and scrolling inside an open list remain available.
+
 In **Settings → Appearance**, choose **Match system**, **Light** or **Dark** and click
 **Save**. The change applies immediately and is remembered after restarting.
+The same section includes **Use OpenDyslexic** and **Text size → Small / Medium /
+Large**, with a sample of your pending choice. Click **Save** to apply the font
+and size throughout the desktop UI; **Cancel** leaves the current appearance
+unchanged. Both choices are remembered after restart, including when the app
+follows the system's light/dark theme. OpenDyslexic is bundled (regular, bold,
+italic, and bold italic); no download or system font installation is needed.
+The font and its SIL Open Font License are included in the app's `ui/fonts`
+resources. Choosing a reading font is a personal preference, not a treatment.
+
+### Spell checking
+
+Editable lot fields (including make, model, caliber, serial, title, description,
+and custom fields), research questions, and notes have offline English spell
+checking. Suspected misspellings get a red
+wavy underline. Right-click a word for suggestions and click one to replace it;
+normal Undo, Cut, Copy, and Paste remain available. **Ignore** skips a word for
+this app session; **Add to dictionary** remembers it on this computer in
+`~/.config/simple-auction/spelling.json`. Custom names and specialist vocabulary
+can be added there through the menu. No text is sent to a spelling service.
+Numeric-only fields, passwords, URLs, API keys, and shipping identifiers are excluded.
+This is spelling assistance, not grammar checking or automatic rewriting.
+
+## Identification, research and publication review
+
+- Serial lookup links appear directly below the serial field, without a menu or
+  disclosure button. **Colt**, **Ruger**, **Browning**, and Lindcott are defaults;
+  every link can be edited, reordered or removed in Settings → Auction setup →
+  Serial number lookup sites. Older settings receive the formerly hard-coded
+  sites once; saved removals are respected. Cody and Colt Archives are not included.
+  Ruger and Lindcott prefill the serial through their supported URL parameters,
+  as do custom URL templates containing `{serial}`. Colt does not support URL
+  prefill: its link copies the serial for pasting. Browning is a dating guide,
+  not a serial-entry form.
+- **Evidence & publication review…** (beside consignment or in the lot's **⋯**
+  menu) stores identification status, dated source links, year/range estimates,
+  uncertainty notes, and supporting photos or PDFs. Attachments are embedded in
+  the lot's packet, so they travel with standalone saves, sharing and backups.
+  Each attachment is limited to 2 MiB and the complete packet to 12 MiB.
+  Different date estimates remain separate and are flagged for review; recording
+  evidence does not change the lot's year or claim legal eligibility.
+- **Research** requests a brief identification note, key facts, and what to verify
+  next, rather than a full history or price report. Ask a follow-up for more
+  detail. The latest answer is shown in full; **Show earlier answers** and
+  **Show sources** reveal conversation history and references on demand.
+  **Include photos in research** sits above **Research tools** and starts off
+  for each lot. **Identify from photos…** is directly beside Research tools;
+  that separate action still asks for permission before sending photos.
+  **Research tools** expands auto-fill and comparable searches. The photo-sharing
+  checkbox stays visible, without an additional disclosure line beneath it.
+  **Save to packet** appears for a completed answer and retains its full text and
+  sources, even when references or earlier answers are collapsed. Partial,
+  stopped and failed answers cannot be captured. The packet's Research tab also
+  records staff notes and unanswered consignor questions.
+- **Find comparables** starts a separate search without serials, photos, free-text
+  descriptions or prior chat history. Verify results, then record them in the
+  packet's **Comparable sales** tab. Sold results and asking prices are separate;
+  record currency, sale date, buyer's-premium treatment and condition differences.
+  This workflow does not automatically appraise the lot.
+- **Identify photos** explicitly asks before sending catalogue details and photos
+  to Google Gemini (requires a configured API key and internet access). Review the
+  suggested fields against the reference photos before applying them. Existing
+  values are not selected for replacement by default. Ambiguous serial characters
+  must be checked by a person, not guessed.
+- **Tools → Ready to publish — work queue…** lists missing identification, photos,
+  unfinished research, unanswered questions, date conflicts and pending listing
+  approval. Double-click an issue to open its lot at the relevant field or review
+  dialog. The photo checklist is an explicit staff review, including categories
+  that are not applicable; it is not an automatic image-quality judgment.
+- Matching make/serial entries show a duplicate/relisting review button. Open the
+  earlier lot, keep the entries separate with an explanation, or mark a relisting
+  and reuse its research. Reused evidence is unverified until reviewed again.
+  This is a warning, never a hard block: serials are not globally unique.
+- Editing listing text clears listing approval. Changing identification clears
+  identification/research approval; changing photos resets their review checklist.
+
+## Phone photo intake
+
+Open **Phone photo intake…** on a saved lot. Select the computer's private LAN
+address and click **Start phone session**. Connect the phone to the same trusted
+Wi-Fi and scan the QR code. The ten-minute link is restricted to that lot and
+expires automatically; keep it private. The page guides overall, opposite-side,
+markings, serial and defect shots. On the phone, choose the view, then use
+**Take picture** to open the camera or **Choose file** to select an existing
+photo. The exact picker depends on your phone/browser. Review the preview
+(or **Remove** it to choose again), then press
+**Send photo**. Upload status confirms receipt; keep the page open while sending.
+Photo tips and network/privacy details expand when needed.
+On the desktop, uncheck unwanted photos and choose **Add photos** to save them
+through the normal photo pipeline. Cancel removes the received temporary files.
+
+Intake uses unencrypted local HTTP, not a public upload service. Allow the app
+through the private-network firewall; guest Wi-Fi isolation can prevent access.
+JPEG, PNG and WebP are supported (not HEIC): 12 MiB and 30 megapixels per image,
+24 images and 100 MiB per session. Camera metadata is stripped. Nothing is sent
+to AI until a separate research/identification request is explicitly made.
+
+## Full backups and consignor review sheets
+
+**Tools → Back up / restore…** creates a new full backup of the main folder,
+separate photos folder, shipping records and sanitized app settings. A live
+shared database is captured consistently, including committed WAL data. API keys
+and pairing codes are excluded. The dialog shows the last successful backup on
+this computer. A remote client cannot claim its cache is a full backup: back up
+on the host instead. Keep backups away from the working folders.
+
+Restore validates paths and checksums and writes only into a new/empty folder;
+it never overwrites the current catalogue. The restored copy includes remapped
+settings with sharing off. Where activation is safe, **Use restored settings
+after restart…** explicitly switches the next launch to that copy and closes the
+current app. With a live database/sharing, stop using that catalogue and reopen
+the restored configuration separately rather than replacing it underneath clients.
+Excel exports are still not backups.
+
+**Tools → Consignor review sheets…** selects an auction, groups its lots by owner,
+and previews printable review sheets with photos, descriptions, unresolved
+questions, and room for corrections/approval. Filter to one owner before exporting
+a PDF for that consignor. Exporting does not change catalogue approval state.
+Use a new filename for backups and review PDFs; existing outputs are not replaced.
 
 ## Local network sharing
 

@@ -2,11 +2,12 @@
 
 import tempfile
 from dataclasses import asdict, dataclass
+from functools import cache
 from pathlib import Path
 from string import Template
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor, QFontDatabase, QGuiApplication, QIcon, QPalette
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPalette
 from PySide6.QtWidgets import QAbstractButton, QApplication, QLabel, QLineEdit
 from shiboken6 import isValid
 
@@ -41,6 +42,33 @@ FONT_SIZES = {
 }
 
 STYLESHEET = Path(__file__).with_name("styles.qss")
+FONT_DIR = Path(__file__).with_name("fonts")
+FONT_SCALES = {"small": 12 / 13, "medium": 1.0, "large": 17 / 13}
+
+
+@cache
+def _dyslexic_family() -> str:
+    families = []
+    for style in ("Regular", "Bold", "Italic", "BoldItalic"):
+        path = FONT_DIR / f"OpenDyslexic-{style}.otf"
+        font_id = QFontDatabase.addApplicationFont(str(path))
+        loaded = QFontDatabase.applicationFontFamilies(font_id)
+        if font_id < 0 or not loaded:
+            raise RuntimeError(f"Could not load bundled OpenDyslexic font: {path}")
+        families.extend(loaded)
+    return families[0]
+
+
+def text_font(*, dyslexic_font: bool = False, font_size: str = "medium") -> QFont:
+    """One app-wide family and base size; role sizes use the same scale."""
+    if font_size not in FONT_SCALES:
+        raise ValueError("Unknown font size")
+    font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+    if dyslexic_font:
+        font.setFamily(_dyslexic_family())
+    font.setPixelSize(round(FONT_SIZES["fs_body"] * FONT_SCALES[font_size]))
+    return font
+
 
 # Line icons (24×24, stroked), drawn in the current theme's colors.
 ICONS = {
@@ -166,16 +194,22 @@ def _is_dark() -> bool:
     return QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
 
 
-def apply(app: QApplication, *, dark_mode: bool | None = None) -> None:
-    """Apply an explicit theme, or follow the OS when no override is saved."""
+def apply(
+    app: QApplication,
+    *,
+    dark_mode: bool | None = None,
+    dyslexic_font: bool = False,
+    font_size: str = "medium",
+) -> None:
+    """Apply color and typography together, including on OS theme changes."""
     global _current
+    font = text_font(dyslexic_font=dyslexic_font, font_size=font_size)
     dark = _is_dark() if dark_mode is None else dark_mode
     _current = DARK if dark else LIGHT
     app.setStyle("Fusion")
-    # The platform's own UI font (Segoe UI on Windows, SF on macOS).
-    app.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont))
+    app.setFont(font)
     app.setPalette(_palette(_current))
-    app.setStyleSheet(_stylesheet(_current))
+    app.setStyleSheet(_stylesheet(_current, font=font, font_size=font_size))
     _refresh_icons()
 
 
@@ -299,12 +333,22 @@ def repolish(widget, **properties) -> None:
         widget.style().polish(widget)
 
 
-def _stylesheet(c: Colors) -> str:
+def _stylesheet(
+    c: Colors, *, font: QFont | None = None, font_size: str = "medium"
+) -> str:
     if not STYLESHEET.exists():
         return ""
     values = (
         asdict(c)
-        | FONT_SIZES
-        | {"radius": RADIUS, "chevron": _chevron(c), "check": _check(c)}
+        | {
+            key: round(value * FONT_SCALES[font_size])
+            for key, value in FONT_SIZES.items()
+        }
+        | {
+            "radius": RADIUS,
+            "chevron": _chevron(c),
+            "check": _check(c),
+            "font_family": (font or text_font()).family().replace('"', '\\"'),
+        }
     )
     return Template(STYLESHEET.read_text()).substitute(values)

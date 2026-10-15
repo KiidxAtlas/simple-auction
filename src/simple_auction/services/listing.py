@@ -6,13 +6,24 @@ from dataclasses import replace
 
 from simple_auction.constants import TITLE_MAX_LENGTH
 from simple_auction.models import Lot
-from simple_auction.services.conditions import ConditionOption
+from simple_auction.services.conditions import (
+    DEFAULT_CONDITIONS,
+    LEGACY_DEFAULT_CONDITIONS,
+    ConditionOption,
+)
 
 
 def _any_of(names: Iterable[str]) -> str | None:
     """Regex alternation for condition names (longest first), or None."""
     unique = sorted({n for n in names if n}, key=len, reverse=True)
     return "|".join(re.escape(n) for n in unique) or None
+
+
+def title_case_name(value: str) -> str:
+    """Capitalize word initials without damaging model codes or mixed-case names."""
+    return re.sub(
+        r"(?<!\w)[^\W\d_]", lambda match: match.group().upper(), value.strip()
+    )
 
 
 def _strip_suffix(title: str, known: Iterable[str]) -> str:
@@ -44,18 +55,64 @@ def untrimmed_title_length(
 
 
 def condition_desc(
-    desc: str, condition: str, note: str, known: Iterable[str] = ()
+    desc: str,
+    condition: str,
+    note: str,
+    known: Iterable[str] = (),
+    *,
+    known_notes: Iterable[str] = (),
 ) -> str:
-    """Make the last paragraph "Condition: <name>. <note>", replacing the
-    line for any earlier condition from `known`."""
+    """Update generated condition wording without deleting surrounding prose.
+
+    Only recognised note prefixes are replaceable. Unfamiliar wording may be a
+    user's edit, so retain it rather than guessing where generated text ends.
+    Existing condition lines stay in place, including text written after them.
+    """
     alts = _any_of([*known, condition])
+    line = f"Condition: {condition}. {note}".strip() if condition else ""
+    notes = sorted(
+        {
+            text.strip()
+            for text in [
+                note,
+                *known_notes,
+                *(
+                    option.note
+                    for option in [*DEFAULT_CONDITIONS, *LEGACY_DEFAULT_CONDITIONS]
+                ),
+            ]
+            if text.strip()
+        },
+        key=len,
+        reverse=True,
+    )
+    found = False
+
+    def replace_line(match: re.Match) -> str:
+        nonlocal found
+        tail = match.group("tail")
+        content = tail.lstrip(" \t")
+        for previous in notes:
+            if content.casefold().startswith(previous.casefold()):
+                tail = content[len(previous) :]
+                break
+        replacement = "" if found else line
+        found = True
+        if not replacement:
+            return tail.lstrip(" \t")
+        separator = " " if tail and not tail[0].isspace() else ""
+        return replacement + separator + tail
+
     if alts:
-        line_re = rf"^Condition:\s*(?:{alts})\..*$"
-        desc = re.sub(line_re, "", desc, flags=re.MULTILINE | re.IGNORECASE)
+        desc = re.sub(
+            rf"^Condition:[ \t]*(?:{alts})\.(?P<tail>[^\n]*)",
+            replace_line,
+            desc,
+            flags=re.MULTILINE | re.IGNORECASE,
+        )
     base = re.sub(r"\n{3,}", "\n\n", desc).strip()
-    if not condition:
+    if found or not line:
         return base
-    line = f"Condition: {condition}. {note}".strip()
     return f"{base}\n\n{line}" if base else line
 
 
@@ -127,7 +184,13 @@ def apply_condition(
     option = find_option(options, lot.condition)
     desc = lot.desc
     if option is not None:
-        desc = condition_desc(lot.desc, option.name, option.note, known)
+        desc = condition_desc(
+            lot.desc,
+            option.name,
+            option.note,
+            known,
+            known_notes=[o.note for o in options],
+        )
     return replace(
         lot,
         title=condition_title(lot.title, lot.condition, known)

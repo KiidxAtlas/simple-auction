@@ -246,9 +246,14 @@ def test_release_build_manifest_and_platform_commands_are_complete(
     assert manifest == {
         "src/simple_auction/ui/styles.qss": "simple_auction/ui",
         "assets/icon.png": "assets",
+        "src/simple_auction/ui/fonts": "simple_auction/ui/fonts",
     }
     for source in manifest:
         assert (build.ROOT / source).exists()
+    fonts = build.ROOT / "src/simple_auction/ui/fonts"
+    for style in ("Regular", "Bold", "Italic", "BoldItalic"):
+        assert (fonts / f"OpenDyslexic-{style}.otf").is_file()
+    assert (fonts / "OFL.txt").is_file()
     assert (build.ROOT / "assets" / "icon.ico").exists()
 
     windows = build.build_command("Windows")
@@ -256,6 +261,8 @@ def test_release_build_manifest_and_platform_commands_are_complete(
     for cmd in (windows, macos):
         assert "--clean" in cmd and "--windowed" in cmd
         assert "--collect-submodules=google.genai" in cmd
+        assert "--collect-data=spellchecker" in cmd
+        assert "--hidden-import=qrcode.image.pil" in cmd
         for source in manifest:
             assert any(source in argument for argument in cmd)
     assert "--onedir" in windows and "--onefile" not in windows

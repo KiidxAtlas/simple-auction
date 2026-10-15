@@ -23,11 +23,24 @@ class SerialLink:
     url: str
 
 
+# Ruger supports URL prefill; Colt and Browning remain reference pages.
+OFFICIAL_LINKS = [
+    SerialLink("Colt official", "https://www.colt.com/serial-lookup/"),
+    SerialLink(
+        "Ruger official",
+        "https://ruger.com/dataProcess/serialHistory/?serial={serial}",
+    ),
+    SerialLink(
+        "Browning dating guide",
+        "https://www.browning.com/support/date-your-firearm.html",
+    ),
+]
 DEFAULT_LINKS = [
     SerialLink(
         "Lindcott Armory",
         "https://lindcottarmory.com/serial-lookup?make={make}&serial={serial}",
     ),
+    *OFFICIAL_LINKS,
 ]
 
 
@@ -57,7 +70,7 @@ def to_json(links: list[SerialLink]) -> list[dict]:
     return [{"name": link.name, "url": link.url} for link in links]
 
 
-def from_json(data: object) -> list[SerialLink]:
+def from_json(data: object, *, add_official: bool = False) -> list[SerialLink]:
     if not isinstance(data, list):
         return list(DEFAULT_LINKS)
     links = [
@@ -65,4 +78,14 @@ def from_json(data: object) -> list[SerialLink]:
         for d in data
         if isinstance(d, dict)
     ]
-    return [link for link in links if is_valid(link)]
+    links = [link for link in links if is_valid(link)]
+    if add_official:
+        # One-time upgrade from hard-coded links; preserve existing custom rows.
+        for link in OFFICIAL_LINKS:
+            if not any(
+                existing.name.casefold() == link.name.casefold()
+                or existing.url == link.url
+                for existing in links
+            ):
+                links.append(link)
+    return links

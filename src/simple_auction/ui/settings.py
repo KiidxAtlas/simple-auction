@@ -4,6 +4,8 @@ from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QIntValidator
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -410,7 +412,7 @@ class SettingsDialog(QDialog):
         custom = self.custom_fields()
         # The house-style example: with the default layout and no extra
         # wording this reads exactly
-        # "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition OK FOR CA".
+        # "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition LEGAL FOR CA".
         sample = Lot(
             1,
             make="Arsenal",
@@ -450,11 +452,42 @@ class SettingsDialog(QDialog):
             section.layout().addWidget(button)
         self.theme_options[config.dark_mode].setChecked(True)
         section.layout().addWidget(self._hint(strings.THEME_HINT))
+        self.dyslexic_toggle = QCheckBox("Use OpenDyslexic")
+        self.dyslexic_toggle.setChecked(config.dyslexic_font)
+        self.dyslexic_toggle.setAccessibleName("Use OpenDyslexic font")
+        section.layout().addWidget(self.dyslexic_toggle)
+        section.layout().addWidget(
+            self._hint(
+                "A bundled reading-friendly font. No separate font installation is needed."
+            )
+        )
+        size_label = QLabel("Text size")
+        self.font_size_choice = QComboBox()
+        self.font_size_choice.setAccessibleName("Text size")
+        for size in ("small", "medium", "large"):
+            self.font_size_choice.addItem(size.title(), size)
+        self.font_size_choice.setCurrentIndex(
+            self.font_size_choice.findData(config.font_size)
+        )
+        size_label.setBuddy(self.font_size_choice)
+        section.layout().addWidget(size_label)
+        section.layout().addWidget(self.font_size_choice)
+        self.font_preview = QLabel(
+            "Aa Bb Dd — Catalogue descriptions and research notes. 0123456789"
+        )
+        self.font_preview.setWordWrap(True)
+        self.font_preview.setAccessibleName("Font preview")
+        section.layout().addWidget(self.font_preview)
+        self.dyslexic_toggle.toggled.connect(self._update_font_preview)
+        self.font_size_choice.currentIndexChanged.connect(self._update_font_preview)
+        self._update_font_preview()
         return section
 
     def _folders_page(self, config: Config) -> QWidget:
         self.folder = QLineEdit(str(config.base_dir))
         self.photos = QLineEdit(str(config.photos_dir))
+        self.folder.setProperty("spellcheck", False)
+        self.photos.setProperty("spellcheck", False)
         section = self._section(strings.FOLDERS_SECTION)
         grid = QGridLayout()
         grid.setHorizontalSpacing(8)
@@ -502,6 +535,7 @@ class SettingsDialog(QDialog):
         label = QLabel(strings.API_KEY)
         label.setObjectName("fieldLabel")
         self.key = QLineEdit()
+        self.key.setProperty("spellcheck", False)  # stays excluded when Show reveals it
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.key.setAccessibleName(strings.API_KEY)
         label.setBuddy(self.key)
@@ -596,6 +630,20 @@ class SettingsDialog(QDialog):
         """True/False for a fixed theme, None to follow the system."""
         return next(
             value for value, button in self.theme_options.items() if button.isChecked()
+        )
+
+    def dyslexic_font(self) -> bool:
+        return self.dyslexic_toggle.isChecked()
+
+    def font_size(self) -> str:
+        return self.font_size_choice.currentData()
+
+    def _update_font_preview(self) -> None:
+        font = theme.text_font(
+            dyslexic_font=self.dyslexic_font(), font_size=self.font_size()
+        )
+        self.font_preview.setStyleSheet(
+            f'font-family: "{font.family()}"; font-size: {font.pixelSize()}px;'
         )
 
     def custom_fields(self) -> list[CustomField]:

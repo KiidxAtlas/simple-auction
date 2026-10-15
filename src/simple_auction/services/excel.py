@@ -1,13 +1,74 @@
 import io
 from contextlib import contextmanager
+from copy import copy
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.utils import get_column_letter
 
 from simple_auction.models import Lot
 from simple_auction.services import storage
 
-HEADERS = ["Lot", "Serial", "Condition", "Title", "Desc", "Owner", "Book #", "Year"]
+# The field mapping also recognizes headers used by older app workbooks.
+COLUMNS = [
+    ("Lot Number", "lot_number", "Lot"),
+    ("Title", "title", "Title"),
+    ("Description", "desc", "Desc"),
+    ("Owner", "owner", "Owner"),
+    ("Book Number", "book_no", "Book #"),
+    ("Serial", "serial", "Serial"),
+    ("Condition", "condition", "Condition"),
+    ("Year", "year", "Year"),
+]
+HEADERS = [header for header, _field, _old in COLUMNS]
+
+
+def _column_fields(headers) -> list[str | None]:
+    aliases = {name: field for header, field, old in COLUMNS for name in (header, old)}
+    fields = [aliases.get(header) for header in headers]
+    known = [field for field in fields if field is not None]
+    if "lot_number" not in known or len(known) != len(set(known)):
+        raise ValueError("Workbook has missing or ambiguous lot columns")
+    return fields
+
+
+def _order_columns(ws) -> None:
+    """Reorder app columns without discarding extra columns or cell formatting."""
+    headers = [cell.value for cell in ws[1]]
+    if headers[: len(HEADERS)] == HEADERS:
+        return
+    fields = _column_fields(headers)
+    order = [
+        fields.index(field) if field in fields else None
+        for _header, field, _old in COLUMNS
+    ] + [i for i, field in enumerate(fields) if field is None]
+    dimensions = {key: copy(value) for key, value in ws.column_dimensions.items()}
+    for row in ws.iter_rows():
+        originals = [copy(cell) for cell in row]
+        for column, source in enumerate(order, 1):
+            target = ws.cell(row[0].row, column)
+            if source is None:
+                target.value = None
+                target._style = None
+                target.comment = None
+                target.hyperlink = None
+                continue
+            cell = originals[source]
+            target.value = cell.value
+            target._style = copy(cell._style)
+            target.comment = copy(cell.comment)
+            target.hyperlink = copy(cell.hyperlink)
+    ws.column_dimensions.clear()
+    for column, source in enumerate(order, 1):
+        old_letter = get_column_letter(source + 1) if source is not None else ""
+        if old_letter in dimensions:
+            letter = get_column_letter(column)
+            dimension = dimensions[old_letter]
+            dimension.index = letter
+            dimension.min = dimension.max = column
+            ws.column_dimensions[letter] = dimension
+    for column, header in enumerate(HEADERS, 1):
+        ws.cell(1, column, header)
 
 
 class ExcelLockedError(Exception):
@@ -48,8 +109,13 @@ def load_auction(path: Path) -> list[Lot]:
         storage.recover(storage.journal_path(path))
         wb = load_workbook(path, read_only=True)
         try:
+            headers = next(wb.active.iter_rows(min_row=1, max_row=1, values_only=True))
+            fields = _column_fields(headers)
+            lot_column = fields.index("lot_number")
             rows = wb.active.iter_rows(min_row=2, values_only=True)
-            return [_row_to_lot(row) for row in rows if row[0] is not None]
+            return [
+                _row_to_lot(row, headers) for row in rows if row[lot_column] is not None
+            ]
         finally:
             wb.close()
 
@@ -100,6 +166,14 @@ def delete_lots(path: Path, lot_numbers: set[int]) -> None:
         _write_data(path, prepare_delete(path, lot_numbers))
 
 
+def export_auction(path: Path, destination: Path) -> None:
+    """Export older workbooks in the current column order without editing the source."""
+    with _edit_workbook(path) as wb:
+        if not path.exists():
+            raise FileNotFoundError(path)
+        _save(wb, destination)
+
+
 @contextmanager
 def _edit_workbook(path: Path):
     with storage.lock:
@@ -108,6 +182,8 @@ def _edit_workbook(path: Path):
         try:
             if not path.exists():
                 wb.active.append(HEADERS)
+            else:
+                _order_columns(wb.active)
             yield wb
         finally:
             wb.close()
@@ -150,28 +226,25 @@ def _write_data(path: Path, data: bytes) -> None:
 
 
 def _lot_to_row(lot: Lot) -> list:
-    return [
-        lot.lot_number,
-        lot.serial,
-        lot.condition,
-        lot.title,
-        lot.desc,
-        lot.owner,
-        lot.book_no,
-        lot.year,
-    ]
+    return [getattr(lot, field) for _header, field, _old in COLUMNS]
 
 
-def _row_to_lot(row: tuple) -> Lot:
-    cells = list(row) + [None] * (len(HEADERS) - len(row))
-    lot_no, serial, condition, title, desc, owner, book_no, year = cells[: len(HEADERS)]
+def _row_to_lot(row: tuple, headers=HEADERS) -> Lot:
+    values = {
+        field: value
+        for field, value in zip(_column_fields(headers), row)
+        if field is not None
+    }
+    year = values.get("year")
+    condition = values.get("condition")
+    book_no = values.get("book_no")
     return Lot(
-        lot_number=int(lot_no),
-        serial=serial or "",
+        lot_number=int(values["lot_number"]),
+        serial=values.get("serial") or "",
         condition=str(condition).strip() if condition is not None else "",
-        title=title or "",
-        desc=desc or "",
-        owner=owner or "",
+        title=values.get("title") or "",
+        desc=values.get("desc") or "",
+        owner=values.get("owner") or "",
         book_no=str(book_no) if book_no is not None else "",
         year=int(year) if year else None,
     )

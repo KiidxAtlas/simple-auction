@@ -175,6 +175,76 @@ def test_serial_lookup_buttons_wait_for_a_serial(app):
     form.deleteLater()
 
 
+def test_consignment_disclosure_keeps_values_and_legality_controls_stay_visible(app):
+    from PySide6.QtTest import QSignalSpy, QTest
+
+    form = LotForm()
+    form.load(Lot(1), 1000)
+    form.show()
+    app.processEvents()
+    edits = QSignalSpy(form.changed)
+    assert form.consignment.content.isVisible()
+    assert form.c_and_r.isVisible()
+    assert form.ca_legality.isVisible()
+    assert form.identification_card.isAncestorOf(form.c_and_r)
+    assert form.listing_card.isAncestorOf(form.ca_legality)
+    assert form.serial_tools.isVisible()
+    form.consignment.set_expanded(False)
+    form.consignment.toggle.setFocus()
+    QTest.keyClick(form.consignment.toggle, Qt.Key.Key_Space)
+    assert form.consignment.content.isVisible()
+    assert edits.count() == 0
+    form.owner.setText("Private collection")
+    form.book_no.setText("B42")
+    form.ca_legality.setCurrentText("LEGAL FOR CA")
+    form.c_and_r.setChecked(True)
+    form.consignment.toggle.click()
+    lot = form.collect()
+    assert (lot.owner, lot.book_no) == ("Private collection", "B42")
+    assert lot.ca_legality == "Legal for CA" and lot.c_and_r
+    form.load(lot, 1000)
+    assert form.consignment.toggle.isChecked()
+    assert form.c_and_r.isChecked()
+    assert form.ca_legality.currentText() == "LEGAL FOR CA"
+    form.load(Lot(2), 1000)
+    assert form.consignment.toggle.isChecked()
+    assert not form.c_and_r.isChecked()
+    assert form.ca_legality.currentText() == "N/A"
+    form.close()
+    form.deleteLater()
+
+
+def test_serial_sources_are_always_visible_without_copy_button(app):
+    form = LotForm()
+    from simple_auction.services.serial_links import DEFAULT_LINKS
+
+    form.set_serial_links(DEFAULT_LINKS)
+    form.load(Lot(1), 1000)
+    form.show()
+    app.processEvents()
+    assert form.serial_tools.isVisible()
+    assert all(
+        button.isVisible() and not button.isEnabled()
+        for button, _link in form._link_buttons
+    )
+    form.serial.setText("A123")
+    assert all(
+        button.isVisible() and button.isEnabled()
+        for button, _link in form._link_buttons
+    )
+    from PySide6.QtWidgets import QPushButton
+
+    assert all(
+        button.text() != "Copy serial"
+        for button in form.serial_tools.findChildren(QPushButton)
+    )
+    form.serial.clear()
+    assert form.serial_tools.isVisible()
+    assert all(not button.isEnabled() for button, _link in form._link_buttons)
+    form.close()
+    form.deleteLater()
+
+
 def _settle(app, rounds: int = 30) -> None:
     for _ in range(rounds):
         app.processEvents()
@@ -199,6 +269,7 @@ def test_lot_editor_reflows_instead_of_cutting_off(app, window, size, research):
     window.form.set_serial_links(links)
     window.show()
     window.create_auction()
+    window.form.serial.setText("A123")
     window.form.research_btn.setChecked(research)
     window.resize(*size)
     _settle(app)

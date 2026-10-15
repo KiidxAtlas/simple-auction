@@ -48,12 +48,12 @@ def test_default_title_matches_the_house_style():
     )
     title = update_title("", Lot(1), fields, lot, fields)
     assert title == (
-        "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition OK FOR CA"
+        "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition LEGAL FOR CA"
     )
     saved = replace(lot, title=title, title_fields=fields)
     # Own words go after the type; edits replace only the generated parts.
     with_words = update_title(
-        "Arsenal SAM7SF 7.62x39 Rifle w/ scope SN: BE 53 1936 Excellent Condition OK FOR CA",
+        "Arsenal SAM7SF 7.62x39 Rifle w/ scope SN: BE 53 1936 Excellent Condition LEGAL FOR CA",
         saved,
         fields,
         replace(saved, condition="Very Good", ca_legality="Not CA legal"),
@@ -61,7 +61,7 @@ def test_default_title_matches_the_house_style():
     )
     assert with_words == (
         "Arsenal SAM7SF 7.62x39 Rifle w/ scope SN: BE 53 1936 "
-        "Very Good Condition NOT CA LEGAL"
+        "Very Good Condition NOT LEGAL FOR CA"
     )
     # A serial alone is enough for a title; a condition alone isn't.
     assert update_title("", Lot(1), fields, Lot(1, serial="X1"), fields) == "SN: X1"
@@ -75,7 +75,7 @@ def test_title_optional_values_and_edits():
     assert title == "Colt Government"
     new = replace(old, barrel_length="5 inches", ca_legality="Not CA legal")
     title = update_title(title, old, fields, new, fields)
-    assert title == "Colt Government Barrel length: 5 inches NOT CA LEGAL"
+    assert title == "Colt Government Barrel length: 5 inches NOT LEGAL FOR CA"
     cleared = replace(new, barrel_length="", ca_legality="N/A")
     assert update_title(title, new, fields, cleared, fields) == "Colt Government"
 
@@ -161,11 +161,11 @@ def test_editor_does_not_put_back_deleted_generated_text(app):
     reopened._apply_title_fields()
     assert reopened.title.text() == "Python Nice gun"
     assert reopened.desc.toPlainText() == "Model: Python\n\nBlued."
-    # A changed value is written again.
+    # Changed title fields still update, but deleted description text stays gone.
     form.make.setText("Ruger")
     form._apply_title_fields()
     assert form.title.text() == "Ruger Python Nice gun"
-    assert form.desc.toPlainText() == "Make: Ruger\nModel: Python\n\nBlued."
+    assert form.desc.toPlainText() == "Model: Python\n\nBlued."
     for f in (form, reopened):
         f.mark_saved()
         f.deleteLater()
@@ -286,20 +286,24 @@ def test_lot_editor_defaults_optional_fields_and_reorder(app):
     assert form.title.text() == "Government Colt"
     form.barrel_length.setText("5 inches")
     form.barrel_length.editingFinished.emit()
-    form.ca_legality.setCurrentText("Not CA legal")
+    form.ca_legality.setCurrentText("NOT LEGAL FOR CA")
     form.ca_legality.activated.emit(form.ca_legality.currentIndex())
-    assert form.title.text() == "Government Colt Barrel length: 5 inches NOT CA LEGAL"
+    assert (
+        form.title.text() == "Government Colt Barrel length: 5 inches NOT LEGAL FOR CA"
+    )
     saved = form.collect()
     assert saved.barrel_length == "5 inches"
     assert saved.ca_legality == "Not CA legal"
     form.set_title_fields(["title", "make", "barrel_length", "ca_legality", "c_and_r"])
     form.c_and_r.click()
     assert form.title.text() == (
-        "Government Colt Barrel length: 5 inches NOT CA LEGAL C&R ELIGIBLE"
+        "Government Colt Barrel length: 5 inches NOT LEGAL FOR CA C&R ELIGIBLE"
     )
     assert form.collect().c_and_r is True
     form.c_and_r.click()
-    assert form.title.text() == "Government Colt Barrel length: 5 inches NOT CA LEGAL"
+    assert (
+        form.title.text() == "Government Colt Barrel length: 5 inches NOT LEGAL FOR CA"
+    )
     form.set_title_fields(["title", "make", "barrel_length", "ca_legality"])
     saved = form.collect()
     # Reopening with another configuration must replace the old generated edges.
@@ -534,11 +538,11 @@ def test_lot_editor_builds_the_house_style_title_from_its_fields(app):
         edit.setText(value)
     form.gun_type.setCurrentText("Rifle")
     form.barrel_length.setText("16 inches")
-    form.ca_legality.setCurrentText("Legal for CA")
+    form.ca_legality.setCurrentText("LEGAL FOR CA")
     form.condition.setCurrentText("Excellent")
     form._apply_title_fields()
     assert form.title.text() == (
-        "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition OK FOR CA"
+        "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition LEGAL FOR CA"
     )
     lot = form.collect()
     assert (lot.caliber, lot.gun_type) == ("7.62x39", "Rifle")

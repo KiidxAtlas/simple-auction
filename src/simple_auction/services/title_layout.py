@@ -28,7 +28,7 @@ FIELD_LABELS = {
     "owner": "Owner",
     "book_no": "Book number",
 }
-# e.g. "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition OK FOR CA"
+# e.g. "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition LEGAL FOR CA"
 DEFAULT_FIELDS = (
     "make",
     "model",
@@ -216,23 +216,36 @@ def has_desc_line(desc: str, label: str) -> bool:
     return re.search(rf"^{re.escape(label)}:", desc, re.MULTILINE) is not None
 
 
-def update_desc(desc: str, replace_labels: list[str], lines: list[str]) -> str:
-    """Put `lines` at the top of the description, removing earlier generated
-    lines (any line starting "<label>:" for the given labels). Everything
-    else the user wrote is kept."""
+def update_desc(
+    desc: str,
+    replace_labels: list[str],
+    lines: list[str],
+    *,
+    replace_exact: list[str] | None = None,
+) -> str:
+    """Put generated lines above user prose.
+
+    Editors can supply the exact lines they own, so partially edited or deleted
+    lines are never mistaken for replaceable generated text.
+    """
     rest = desc
-    unique = sorted({x for x in replace_labels if x}, key=len, reverse=True)
-    if unique:
-        alts = "|".join(re.escape(x) for x in unique)
-        rest = re.sub(rf"^(?:{alts}):.*(?:\n|$)", "", rest, flags=re.MULTILINE)
+    if replace_exact is not None:
+        owned = set(replace_exact)
+        rest = "\n".join(line for line in desc.split("\n") if line not in owned)
+    else:
+        unique = sorted({x for x in replace_labels if x}, key=len, reverse=True)
+        if unique:
+            alts = "|".join(re.escape(x) for x in unique)
+            rest = re.sub(rf"^(?:{alts}):.*(?:\n|$)", "", rest, flags=re.MULTILINE)
     rest = re.sub(r"\n{3,}", "\n\n", rest).strip()
     head = "\n".join(lines)
     return "\n\n".join(part for part in (head, rest) if part)
 
 
 # How titles are written, matching auction listings like
-# "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition OK FOR CA".
-CA_TITLE_TEXT = {"Legal for CA": "OK FOR CA", "Not CA legal": "NOT CA LEGAL"}
+# "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition LEGAL FOR CA".
+CA_TITLE_TEXT = {"Legal for CA": "LEGAL FOR CA", "Not CA legal": "NOT LEGAL FOR CA"}
+PREVIOUS_CA_TITLE_TEXT = {"Legal for CA": "OK FOR CA", "Not CA legal": "NOT CA LEGAL"}
 C_AND_R_TITLE_TEXT = "C&R ELIGIBLE"
 # Fields that alone don't make a title (a lot with just a condition stays
 # untitled until something describes the item).
@@ -289,11 +302,19 @@ def _strip(
     part the user deleted doesn't stop the others being recognised."""
     pivot = layout.index("title")
     found = set()
+
+    def parts(key: str) -> tuple[str, ...]:
+        current = _value(lot, key, prefix_for, legacy)
+        if key == "ca_legality" and not legacy:
+            return current, PREVIOUS_CA_TITLE_TEXT.get(lot.ca_legality, "")
+        return (current,)
+
     for key in layout[:pivot]:
-        part = _value(lot, key, prefix_for, legacy)
-        if part and _starts(rest, part):
-            rest = rest[len(part) :].strip()
-            found.add(key)
+        for part in parts(key):
+            if part and _starts(rest, part):
+                rest = rest[len(part) :].strip()
+                found.add(key)
+                break
     tail = layout[pivot + 1 :]
     if legacy:
         # Older titles ended " - <suffix>", written as a whole.
@@ -307,10 +328,11 @@ def _strip(
             found |= set(values)
         return rest, found
     for key in reversed(tail):
-        part = _value(lot, key, prefix_for, False)
-        if part and _ends(rest, part):
-            rest = rest[: -len(part)].strip()
-            found.add(key)
+        for part in parts(key):
+            if part and _ends(rest, part):
+                rest = rest[: -len(part)].strip()
+                found.add(key)
+                break
     return rest, found
 
 

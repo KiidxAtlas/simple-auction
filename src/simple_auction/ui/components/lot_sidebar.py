@@ -320,7 +320,10 @@ class _TreeDelegate(QStyledItemDelegate):
         self.tree = tree
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
-        return QSize(option.rect.width(), theme.TREE_ROW_HEIGHT)
+        return QSize(
+            option.rect.width(),
+            max(theme.TREE_ROW_HEIGHT, option.fontMetrics.height() + 12),
+        )
 
     def _plus_rect(self, row: QRect) -> QRect:
         return QRect(

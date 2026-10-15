@@ -15,6 +15,7 @@ APP_NAME = "SimpleAuction"
 DATA_FILES = (
     ("src/simple_auction/ui/styles.qss", "simple_auction/ui"),
     ("assets/icon.png", "assets"),
+    ("src/simple_auction/ui/fonts", "simple_auction/ui/fonts"),
 )
 
 
@@ -41,6 +42,9 @@ def build_command(system: str | None = None) -> list[str]:
         "--collect-submodules=google.genai",
         "--collect-submodules=keyring.backends",
         "--copy-metadata=keyring",
+        # Offline spelling dictionaries are package data, not Python modules.
+        "--collect-data=spellchecker",
+        "--hidden-import=qrcode.image.pil",
     ]
 
     for source, destination in DATA_FILES:

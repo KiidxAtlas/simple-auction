@@ -11,6 +11,8 @@ from simple_auction.constants import APP_NAME
 from simple_auction.services.config import CONFIG_PATH, Config, ConfigFileError
 from simple_auction.ui import strings, theme
 from simple_auction.ui.main_page import MainPage
+from simple_auction.ui.spellcheck import install_spellcheck
+from simple_auction.ui.wheel_guard import install_dropdown_wheel_guard
 
 LOG_PATH = CONFIG_PATH.parent / "simple-auction.log"
 
@@ -118,6 +120,7 @@ def main() -> int:
     sys.excepthook = _report_unexpected_error
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    install_dropdown_wheel_guard(app)
     theme.apply(app)
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     instance_lock = QLockFile(str(CONFIG_PATH.with_suffix(".lock")))
@@ -129,9 +132,20 @@ def main() -> int:
     config = _load_config()
     if config is None:
         return 1
-    theme.apply(app, dark_mode=config.dark_mode)
+    app.spellcheck = install_spellcheck(app)
+    theme.apply(
+        app,
+        dark_mode=config.dark_mode,
+        dyslexic_font=config.dyslexic_font,
+        font_size=config.font_size,
+    )
     app.styleHints().colorSchemeChanged.connect(
-        lambda _: theme.apply(app, dark_mode=config.dark_mode)
+        lambda _: theme.apply(
+            app,
+            dark_mode=config.dark_mode,
+            dyslexic_font=config.dyslexic_font,
+            font_size=config.font_size,
+        )
     )
     config.move_old_files()  # older versions kept everything in one folder
     window = MainPage(config)

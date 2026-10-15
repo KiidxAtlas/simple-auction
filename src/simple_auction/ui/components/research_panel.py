@@ -3,17 +3,21 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from html import escape
 
 import httpx
 from google.genai import errors
 from google.genai._gaos.lib import compat_errors as ce
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QTextBrowser,
@@ -25,14 +29,18 @@ from simple_auction.models import Lot
 from simple_auction.services.research import (
     AUTOFILL_FIELDS,
     AUTOFILL_REQUEST,
+    COMPARABLES_REQUEST,
     RESEARCH_REQUEST,
     MissingApiKeyError,
     ResearchChat,
     ResearchFailedError,
+    comparable_lot,
+    safe_source_url,
 )
 from simple_auction.services.title_layout import CustomField
 from simple_auction.ui import strings, theme
 from simple_auction.ui.autofill_dialog import AutofillDialog
+from simple_auction.ui.flow_layout import FlowLayout
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +55,8 @@ class _Turn:
     notice: str = ""  # why the answer is missing or cut short
     note: str = ""  # about how the answer was made (e.g. without web search)
     photos: int = 0  # photos sent along with this question
+    completed: bool = False
+    saved: bool = False
 
 
 def _api_message(e: ce.APIStatusError) -> str:
@@ -179,6 +189,7 @@ class _Job(QObject):
 class ResearchPanel(QFrame):
     closed = Signal()
     apply_requested = Signal(dict)  # reviewed auto-fill values: {key: value}
+    packet_saved = Signal(dict)  # explicit capture; caller persists in lot dossier
 
     def __init__(self, lot_provider: Callable[[], Lot | None]) -> None:
         super().__init__()
@@ -186,12 +197,12 @@ class ResearchPanel(QFrame):
         self.setMinimumWidth(theme.RESEARCH_MIN_WIDTH)
         self._lot_provider = lot_provider
         self._custom_fields: list[CustomField] = []
-        self._chat = ResearchChat()
+        self._chat = ResearchChat(include_photos=False)
         self._turns: list[_Turn] = []
         self._job: _Job | None = None
         self._pending_fill: tuple[dict, Lot] | None = None
         self._has_lot = False
-        self._has_lot = False
+        self._stopping = False
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._render)
@@ -246,7 +257,19 @@ class ResearchPanel(QFrame):
 
         self.transcript = QTextBrowser()
         self.transcript.setObjectName("transcript")
-        self.transcript.setOpenExternalLinks(True)
+        self.transcript.setOpenExternalLinks(False)
+        self.transcript.setOpenLinks(False)
+        self.transcript.anchorClicked.connect(self._open_source)
+
+        self.history_btn = QPushButton("Show earlier answers")
+        self.history_btn.setCheckable(True)
+        self.history_btn.toggled.connect(self._render)
+        self.sources_btn = QPushButton("Show sources")
+        self.sources_btn.setCheckable(True)
+        self.sources_btn.toggled.connect(self._render)
+        reading_tools = FlowLayout()
+        reading_tools.addWidget(self.history_btn)
+        reading_tools.addWidget(self.sources_btn)
 
         self.stack = QStackedWidget()
         self.stack.addWidget(empty)
@@ -255,9 +278,9 @@ class ResearchPanel(QFrame):
         self.status = QLabel()
         self.status.setObjectName("hint")
 
-        # Photos go along so Gemini can see the item; can be switched off.
+        # Photo sharing is an explicit opt-in for each lot's conversation.
         self.photos_toggle = QCheckBox(strings.RESEARCH_INCLUDE_PHOTOS)
-        self.photos_toggle.setChecked(True)
+        self.photos_toggle.setChecked(False)
         self.photos_toggle.setToolTip(strings.RESEARCH_INCLUDE_PHOTOS_TIP)
         self.photos_toggle.toggled.connect(
             lambda on: setattr(self._chat, "include_photos", on)
@@ -266,11 +289,35 @@ class ResearchPanel(QFrame):
         self.autofill_btn.setToolTip(strings.AUTOFILL_TIP)
         theme.set_icon(self.autofill_btn, "sparkle")
         self.autofill_btn.clicked.connect(self.autofill)
-        tools = QHBoxLayout()
+        self.identify_btn = QPushButton("Identify from photos…")
+        self.identify_btn.clicked.connect(self.identify_photos)
+        self.comparables_btn = QPushButton("Find comparables")
+        self.comparables_btn.setToolTip(
+            "Search make/model details only, without serial, free text or photos. "
+            "Results are not an appraisal; verify Sold versus Asking."
+        )
+        self.comparables_btn.clicked.connect(self.find_comparables)
+        self.save_packet_btn = QPushButton("Save to packet")
+        self.save_packet_btn.setToolTip(
+            "Save the full answer and its sources to this lot's research packet"
+        )
+        self.save_packet_btn.clicked.connect(self.save_packet)
+        self.tools_btn = QPushButton("Research tools")
+        self.tools_btn.setCheckable(True)
+        self.tools_btn.setToolTip("Auto-fill fields and comparable sales")
+        self.extra_tools = QWidget()
+        extra_layout = QVBoxLayout(self.extra_tools)
+        extra_layout.setContentsMargins(0, 0, 0, 0)
+        for button in (self.autofill_btn, self.comparables_btn):
+            extra_layout.addWidget(button)
+        self.tools_btn.toggled.connect(self.extra_tools.setVisible)
+        self.extra_tools.hide()
+        self.tools_row = QWidget()
+        tools = FlowLayout(self.tools_row)
         tools.setSpacing(8)
-        tools.addWidget(self.photos_toggle)
-        tools.addStretch(1)
-        tools.addWidget(self.autofill_btn)
+        tools.addWidget(self.tools_btn)
+        tools.addWidget(self.identify_btn)
+        tools.addWidget(self.save_packet_btn)
 
         self.question = QLineEdit()
         self.question.setPlaceholderText(strings.RESEARCH_ASK_PLACEHOLDER)
@@ -287,9 +334,12 @@ class ResearchPanel(QFrame):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
         layout.addLayout(header)
+        layout.addLayout(reading_tools)
         layout.addWidget(self.stack, 1)
         layout.addWidget(self.status)
-        layout.addLayout(tools)
+        layout.addWidget(self.photos_toggle)
+        layout.addWidget(self.tools_row)
+        layout.addWidget(self.extra_tools)
         layout.addLayout(ask_row)
 
         self.reset(None)
@@ -302,11 +352,16 @@ class ResearchPanel(QFrame):
             self._job.stop()  # finishes on its own; its signals are ignored
             self._job = None
         self._pending_fill = None
+        self.photos_toggle.setChecked(False)
         self._chat = ResearchChat(
             custom_fields=self._custom_fields,
             include_photos=self.photos_toggle.isChecked(),
         )
         self._turns = []
+        self.history_btn.setChecked(False)
+        self.sources_btn.setChecked(False)
+        self.tools_btn.setChecked(False)
+        self._render()
         self.transcript.clear()
         self.stack.setCurrentIndex(0)
         self.status.clear()
@@ -324,6 +379,62 @@ class ResearchPanel(QFrame):
         """Ask Gemini for field values, then let the user review them."""
         self._ask(AUTOFILL_REQUEST, label=strings.AUTOFILL_TURN_LABEL, fill=True)
 
+    def identify_photos(self) -> None:
+        lot = self._lot_provider()
+        if lot is None or self._job is not None:
+            return
+        if not lot.photos:
+            self.status.setText("Add photos before photo-assisted identification.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Send photos to Gemini?",
+            "The lot's photos and catalogue details will be sent to Google Gemini. "
+            "AI can misread markings (O/0, I/1, S/5). You must review suggestions "
+            "against the photos and select each field before applying. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.photos_toggle.setChecked(True)
+            self.autofill()
+
+    def find_comparables(self) -> None:
+        self._ask(
+            COMPARABLES_REQUEST,
+            label="Find comparables (serial excluded)",
+            comparables=True,
+        )
+
+    def save_packet(self) -> None:
+        """Capture the latest completed answer once; persistence belongs to caller."""
+        turn = self._turns[-1] if self._turns else None
+        if self._job is not None or turn is None or not turn.completed or turn.saved:
+            return
+        if not turn.answer.strip() or turn.notice:
+            return
+        record = {
+            "question": turn.question,
+            "answer": turn.answer,
+            "checked_on": datetime.now(UTC).date().isoformat(),
+            "sources": [
+                {"title": title, "url": url}
+                for title, url in turn.sources
+                if safe_source_url(url)
+            ],
+        }
+        turn.saved = True
+        self.packet_saved.emit(record)
+        self.save_packet_btn.setEnabled(False)
+        self.save_packet_btn.hide()
+        self.status.setText(
+            "Answer captured in research packet; verify sources before relying on it."
+        )
+
+    def _open_source(self, url) -> None:
+        if safe_source_url(url.toString()):
+            QDesktopServices.openUrl(url)
+
     def set_custom_fields(self, fields: list[CustomField]) -> None:
         """Custom fields from Settings: sent with the lot and auto-filled."""
         self._custom_fields = list(fields)
@@ -340,17 +451,27 @@ class ResearchPanel(QFrame):
     def _ask_or_stop(self) -> None:
         if self._job is not None:
             self._job.stop()
+            self._stopping = True
             self.status.setText(strings.RESEARCH_STOPPING)
             self.ask_btn.setEnabled(False)
         else:
             self._ask_typed()
 
-    def _ask(self, question: str, label: str | None = None, *, fill=False) -> None:
+    def _ask(
+        self, question: str, label: str | None = None, *, fill=False, comparables=False
+    ) -> None:
         lot = self._lot_provider()
         if lot is None or self._job is not None:
             return
+        self._stopping = False
+        chat = self._chat
+        if comparables:
+            # A fresh conversation prevents server-side history leaking serials.
+            lot = comparable_lot(lot)
+            chat = ResearchChat(include_photos=False)
         turn = _Turn(question=label or question)
         self._turns.append(turn)
+        self.sources_btn.setChecked(False)
         self.stack.setCurrentIndex(1)
         self.status.setText(
             strings.AUTOFILL_WORKING if fill else strings.RESEARCH_THINKING
@@ -358,7 +479,7 @@ class ResearchPanel(QFrame):
         self._set_busy(True)
         self._render()
 
-        job = _Job(self._chat, question, lot, autofill=fill)
+        job = _Job(chat, question, lot, autofill=fill)
         self._job = job
         mine = lambda: self._job is job
         # Signals come from the worker thread; queue them onto the UI thread.
@@ -385,13 +506,17 @@ class ResearchPanel(QFrame):
             self._render_timer.start(RENDER_MS)
 
     def _on_done(self, turn: _Turn, sources: list) -> None:
-        turn.sources = sources
+        turn.sources = [(str(t), str(u)) for t, u in sources if safe_source_url(u)]
+        turn.completed = True
 
     def _on_notice(self, turn: _Turn, message: str) -> None:
         turn.notice = message
 
     def _on_finished(self, turn: _Turn) -> None:
         self._job = None
+        if self._stopping:
+            turn.completed = False
+            turn.notice = strings.RESEARCH_STOPPED
         if not turn.answer and not turn.notice:
             turn.notice = strings.RESEARCH_STOPPED
         self.status.clear()
@@ -408,14 +533,40 @@ class ResearchPanel(QFrame):
         self.ask_btn.setEnabled(self._has_lot)
         self.start_btn.setEnabled(self._has_lot and not busy)
         self.autofill_btn.setEnabled(self._has_lot and not busy)
+        self.identify_btn.setEnabled(self._has_lot and not busy)
+        self.comparables_btn.setEnabled(self._has_lot and not busy)
+        last = self._turns[-1] if self._turns else None
+        can_save = bool(
+            not busy
+            and last
+            and last.completed
+            and not last.saved
+            and last.answer.strip()
+            and not last.notice
+        )
+        self.save_packet_btn.setEnabled(can_save)
+        self.save_packet_btn.setVisible(can_save)
 
     # -- rendering ----------------------------------------------------------
 
     def _render(self) -> None:
         bar = self.transcript.verticalScrollBar()
         at_bottom = bar.value() >= bar.maximum() - 8
+        show_history = self.history_btn.isChecked()
+        turns = self._turns if show_history else self._turns[-1:]
+        self.history_btn.setVisible(len(self._turns) > 1)
+        self.history_btn.setText(
+            "Hide earlier answers" if show_history else "Show earlier answers"
+        )
+        source_count = sum(len(turn.sources) for turn in turns)
+        self.sources_btn.setVisible(source_count > 0)
+        self.sources_btn.setText(
+            "Hide sources"
+            if self.sources_btn.isChecked()
+            else f"Show sources ({source_count})"
+        )
         parts = []
-        for turn in self._turns:
+        for turn in turns:
             parts.append(f"**{strings.RESEARCH_YOU}** {turn.question}")
             if turn.photos:
                 parts.append(f"*{strings.RESEARCH_PHOTOS_SENT.format(n=turn.photos)}*")
@@ -425,8 +576,12 @@ class ResearchPanel(QFrame):
                 parts.append(f"*{turn.notice}*")
             elif turn.note and turn.answer:
                 parts.append(f"*{turn.note}*")
-            if turn.sources:
-                links = "\n".join(f"- [{t}]({u})" for t, u in turn.sources)
+            if turn.sources and self.sources_btn.isChecked():
+                links = "\n".join(
+                    f'- <a href="{escape(u, quote=True)}">{escape(t)}</a>'
+                    for t, u in turn.sources
+                    if safe_source_url(u)
+                )
                 parts.append(f"**{strings.RESEARCH_SOURCES}**\n\n{links}")
             parts.append("---")
         self.transcript.setMarkdown("\n\n".join(parts[:-1]))

@@ -458,6 +458,8 @@ class ShippingPage(QWidget):
             group_layout.setSpacing(4)
             group_layout.addWidget(QLabel(label))
             edit = QLineEdit()
+            # Addresses and names are literal shipping data, not listing prose.
+            edit.setProperty("spellcheck", False)
             if key == "country":
                 edit.setMaxLength(2)
                 edit.setPlaceholderText("US, CA, GB…")

@@ -1,6 +1,7 @@
 """Review research auto-fill suggestions before they go into the lot."""
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -15,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from simple_auction.models import Lot
-from simple_auction.services.research import AUTOFILL_FIELDS
+from simple_auction.services.research import AUTOFILL_FIELDS, MAX_PHOTOS
 from simple_auction.services.title_layout import (
     CUSTOM_PREFIX,
     CustomField,
@@ -35,8 +36,8 @@ def current_value(lot: Lot, key: str) -> str:
 class AutofillDialog(QDialog):
     """One row per suggestion: tick it, adjust the text, then Fill.
 
-    Suggestions for empty fields start ticked; ones that would replace what's
-    already there start unticked, showing the current value.
+    Empty fields start ticked; replacements always start unticked. Current
+    values and reference photos are shown for an explicit review decision.
     """
 
     def __init__(
@@ -69,6 +70,8 @@ class AutofillDialog(QDialog):
             check.setChecked(not current)
             check.setEnabled(not same)
             edit = QLineEdit(suggested)
+            if key in {name for name, _label, _hint in AUTOFILL_FIELDS}:
+                edit.setProperty("spellcheck", False)
             edit.setAccessibleName(label)
             edit.setCursorPosition(0)
             edit.textEdited.connect(lambda _t, c=check: c.setChecked(True))
@@ -98,6 +101,29 @@ class AutofillDialog(QDialog):
         intro.setWordWrap(True)
         body_layout.addWidget(intro)
         body_layout.addSpacing(10)
+        warning = QLabel(
+            "AI suggestions are unverified. Check markings against the photos; "
+            "O/0, I/1 and S/5 can be ambiguous. Leave uncertain fields unselected. "
+            "Only explicitly selected values will be applied."
+        )
+        warning.setWordWrap(True)
+        body_layout.addWidget(warning)
+        for path in lot.photos[:MAX_PHOTOS]:
+            photo = QLabel()
+            pixmap = QPixmap(str(path))
+            if pixmap.isNull():
+                photo.setText(f"Photo unavailable: {path.name}")
+            else:
+                photo.setPixmap(
+                    pixmap.scaled(
+                        480,
+                        200,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+            photo.setAccessibleName(f"Reference photo: {path.name}")
+            body_layout.addWidget(photo)
         body_layout.addLayout(grid)
         body_layout.addStretch(1)
         scroll = QScrollArea()

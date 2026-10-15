@@ -95,6 +95,7 @@ class NetworkSettings(QFrame):
         join_layout.setVerticalSpacing(10)
         join_layout.setHorizontalSpacing(14)
         self.address = QLineEdit(settings.address)
+        self.address.setProperty("spellcheck", False)
         self.address.setPlaceholderText("192.168.1.20:8765")
         self.address.textEdited.connect(lambda: setattr(self, "identity", ""))
         find = QPushButton("Find host")

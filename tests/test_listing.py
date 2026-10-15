@@ -1,3 +1,5 @@
+import pytest
+
 from simple_auction.models import Lot
 from simple_auction.services.conditions import (
     DEFAULT_CONDITIONS,
@@ -29,7 +31,8 @@ def test_empty_title_stays_empty():
 
 def test_no_condition_means_no_suffix_or_sentence():
     assert condition_title("Colt - Good", "", KNOWN) == "Colt"
-    assert condition_desc("Blued.\n\nCondition: Good. x", "", "", KNOWN) == "Blued."
+    desc = f"Blued.\n\nCondition: Good. {NOTE['Good']}"
+    assert condition_desc(desc, "", "", KNOWN) == "Blued."
 
 
 def test_desc_sentence_replaced_not_duplicated():
@@ -42,8 +45,9 @@ def test_desc_sentence_replaced_not_duplicated():
 def test_desc_keeps_user_text_after_condition_line():
     d = condition_desc("Line one.", "Good", NOTE["Good"], KNOWN) + "\n\nIncludes case."
     d = condition_desc(d, "Excellent", NOTE["Excellent"], KNOWN)
-    assert "Includes case." in d and d.count("Condition:") == 1
-    assert d.endswith(f"Condition: Excellent. {NOTE['Excellent']}")
+    assert (
+        d == f"Line one.\n\nCondition: Excellent. {NOTE['Excellent']}\n\nIncludes case."
+    )
 
 
 def test_condition_without_text_writes_just_the_name():
@@ -66,7 +70,9 @@ def test_custom_condition_and_new_wording():
     assert out.desc.endswith("Condition: Very Good+. Sharp, crisp markings.")
     reworded = [ConditionOption("Very Good+", "Crisp markings, 95% finish.")]
     again = apply_condition(out, reworded)
-    assert again.desc.endswith("Condition: Very Good+. Crisp markings, 95% finish.")
+    assert "Condition: Very Good+. Crisp markings, 95% finish." in again.desc
+    # Without the previous template, unfamiliar wording is preserved, not erased.
+    assert "Sharp, crisp markings." in again.desc
     assert again.desc.count("Condition:") == 1
 
 
@@ -115,3 +121,43 @@ def test_no_condition_leaves_lot_alone():
         condition="",
     )
     assert apply_condition(lot, DEFAULT_CONDITIONS) == lot
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        " Includes case and two magazines.",
+        "\nIncludes case.",
+        "\n\nIncludes case.\nExtra provenance.",
+    ],
+)
+def test_condition_update_preserves_appended_text_in_place(suffix):
+    old = f"Condition: Good. {NOTE['Good']}"
+    new = f"Condition: Excellent. {NOTE['Excellent']}"
+    desc = f"Listing details.\n\n{old}{suffix}"
+    updated = condition_desc(desc, "Excellent", NOTE["Excellent"], KNOWN)
+    assert updated == f"Listing details.\n\n{new}{suffix}"
+    assert condition_desc(updated, "Excellent", NOTE["Excellent"], KNOWN) == updated
+
+
+def test_condition_clear_preserves_unrecognised_custom_text():
+    assert (
+        condition_desc(
+            "Listing.\n\nCondition: Good. Handwritten inspection notes.", "", "", KNOWN
+        )
+        == "Listing.\n\nHandwritten inspection notes."
+    )
+
+
+def test_custom_note_rewording_removes_only_known_previous_note():
+    desc = "Listing.\n\nCondition: Very Good+. Original note. Includes case.\nKeep this paragraph."
+    assert (
+        condition_desc(
+            desc,
+            "Very Good+",
+            "Revised note.",
+            ["Very Good+"],
+            known_notes=["Original note."],
+        )
+        == "Listing.\n\nCondition: Very Good+. Revised note. Includes case.\nKeep this paragraph."
+    )

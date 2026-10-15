@@ -67,6 +67,8 @@ class Config:
     conditions_error: str | None = field(default=None, compare=False)
     # None keeps the OS theme for settings created before the manual toggle.
     dark_mode: bool | None = None
+    dyslexic_font: bool = False
+    font_size: str = "medium"
     sharing: Sharing = field(default_factory=Sharing)
     title_fields: list[str] = field(default_factory=lambda: list(DEFAULT_FIELDS))
     # Fields written as "Label: value" lines at the top of the description.
@@ -118,6 +120,16 @@ class Config:
         dark_mode = data.get("dark_mode")
         if dark_mode is not None and type(dark_mode) is not bool:
             raise TypeError("dark_mode must be true, false or null")
+        dyslexic_font = data.get("dyslexic_font", False)
+        font_size = data.get("font_size", "medium")
+        if type(dyslexic_font) is not bool:
+            raise TypeError("dyslexic_font must be true or false")
+        if not isinstance(font_size, str) or font_size not in (
+            "small",
+            "medium",
+            "large",
+        ):
+            raise ValueError("font_size must be small, medium or large")
         if step <= 0 or (start is not None and (type(start) is not int or start < 0)):
             raise ValueError("invalid auction numbering settings")
         sharing = Sharing(**data.get("sharing", {}))
@@ -138,8 +150,13 @@ class Config:
             photos_dir=Path(photos),
             step=step,
             start_at=start,
-            serial_links=serial_links.from_json(data.get("serial_links")),
+            serial_links=serial_links.from_json(
+                data.get("serial_links"),
+                add_official=data.get("serial_links_configurable") is not True,
+            ),
             dark_mode=dark_mode,
+            dyslexic_font=dyslexic_font,
+            font_size=font_size,
             sharing=sharing,
             title_fields=title_fields,
             desc_fields=desc_fields,
@@ -172,7 +189,10 @@ class Config:
             "step": self.step,
             "start_at": self.start_at,
             "serial_links": serial_links.to_json(self.serial_links),
+            "serial_links_configurable": True,
             "dark_mode": self.dark_mode,
+            "dyslexic_font": self.dyslexic_font,
+            "font_size": self.font_size,
             "sharing": vars(self.sharing),
             "title_fields": self.title_fields,
             "desc_fields": self.desc_fields,

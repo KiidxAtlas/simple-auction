@@ -1,4 +1,5 @@
 import math
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QBoxLayout,
     QCheckBox,
     QComboBox,
@@ -39,16 +41,21 @@ from PySide6.QtWidgets import (
 
 from simple_auction.constants import TITLE_MAX_LENGTH
 from simple_auction.models import Lot
+from simple_auction.services import dossier
 from simple_auction.services.conditions import DEFAULT_CONDITIONS, ConditionOption
 from simple_auction.services.listing import (
     condition_desc,
     find_option,
-    has_condition_line,
+    title_case_name,
 )
 from simple_auction.services.lookup import LookupResult
-from simple_auction.services.serial_links import SerialLink, build_url
+from simple_auction.services.serial_links import (
+    SerialLink,
+    build_url,
+)
 from simple_auction.services.title_layout import (
     CA_LEGALITY,
+    CA_TITLE_TEXT,
     CUSTOM_PREFIX,
     DEFAULT_DESC_FIELDS,
     DEFAULT_FIELDS,
@@ -65,6 +72,7 @@ from simple_auction.services.title_layout import (
     validate_desc,
 )
 from simple_auction.ui import strings, theme
+from simple_auction.ui.components.scrollable_line_edit import ScrollableLineEdit
 from simple_auction.ui.flow_layout import FlowLayout
 
 PHOTO_SUFFIXES = (".jpg", ".jpeg", ".png", ".heic", ".webp")
@@ -118,6 +126,34 @@ def _card(title: str) -> tuple[QFrame, QVBoxLayout]:
     heading.setObjectName("cardTitle")
     layout.addWidget(heading)
     return card, layout
+
+
+class _Disclosure(QFrame):
+    """Optional fields stay keyboard-accessible without dominating the editor."""
+
+    def __init__(self, title: str) -> None:
+        super().__init__()
+        self.setObjectName("card")
+        self._title = title
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 12, 18, 12)
+        layout.setSpacing(10)
+        self.toggle = QPushButton()
+        self.toggle.setCheckable(True)
+        self.toggle.setAccessibleName(title)
+        self.content = QWidget()
+        self.body = QVBoxLayout(self.content)
+        self.body.setContentsMargins(0, 0, 0, 0)
+        self.body.setSpacing(10)
+        layout.addWidget(self.toggle)
+        layout.addWidget(self.content)
+        self.toggle.toggled.connect(self.set_expanded)
+        self.set_expanded(False)
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.toggle.setChecked(expanded)
+        self.toggle.setText(f"{'▾' if expanded else '▸'} {self._title}")
+        self.content.setVisible(expanded)
 
 
 class _FieldGrid(QWidget):
@@ -256,6 +292,9 @@ class LotForm(QWidget):
     step_requested = Signal(int)  # -1 previous lot, +1 next lot
     serial_lookup_requested = Signal(str)
     research_toggled = Signal(bool)
+    evidence_requested = Signal()
+    phone_requested = Signal()
+    duplicates_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -265,6 +304,7 @@ class LotForm(QWidget):
         self._photos: list[Path] = []
         self._dirty = False
         self._loading = False
+        self._review_identity: tuple = ()
         self._link_buttons: list[tuple[QPushButton, SerialLink]] = []
         self._title_fields = list(DEFAULT_FIELDS)
         self._applied_title_lot = Lot(0)
@@ -272,6 +312,7 @@ class LotForm(QWidget):
         # currently in the title/description (so changing it replaces that).
         self._conditions: list[ConditionOption] = list(DEFAULT_CONDITIONS)
         self._applied_condition = ""
+        self._applied_condition_note = ""
         # Custom fields from Settings, their line edits by field id, and the
         # text written before each one's value in the title (now and as last
         # applied to the title, so a changed prefix replaces the old one).
@@ -385,6 +426,10 @@ class LotForm(QWidget):
         self.heading.setObjectName("lotTitle")
         self.heading.setWordWrap(True)
         self.heading.setTextFormat(Qt.TextFormat.PlainText)
+        # A long unbroken title must not force the entire page wider.
+        self.heading.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         titles = QVBoxLayout()
         titles.setSpacing(4)
         titles.addLayout(self._crumbs)
@@ -409,6 +454,9 @@ class LotForm(QWidget):
         self.export_action.setToolTip(strings.EXPORT_TIP)
         theme.set_icon(self.export_action, "export")
         self.export_action.triggered.connect(self.export_requested)
+        more.addSeparator()
+        more.addAction("Evidence & publication review…", self.evidence_requested.emit)
+        more.addAction("Phone photo intake…", self.phone_requested.emit)
         more.addSeparator()
         delete = more.addAction(strings.DELETE_LOT)
         theme.set_icon(delete, "trash")
@@ -457,13 +505,19 @@ class LotForm(QWidget):
         serial_layout.setContentsMargins(0, 0, 0, 0)
         serial_layout.setSpacing(6)
         serial_layout.addWidget(self.serial)
+        self.serial_tools = QWidget()
+        serial_tools_layout = QVBoxLayout(self.serial_tools)
+        serial_tools_layout.setContentsMargins(0, 0, 0, 0)
+        serial_tools_layout.setSpacing(6)
         self.lookup_links = QWidget()
         self._links_layout = FlowLayout(self.lookup_links)
         look_up = QLabel(strings.LOOK_UP_ON)
         look_up.setObjectName("fieldHint")
         self._links_layout.addWidget(look_up)
         self.lookup_links.hide()
-        serial_layout.addWidget(self.lookup_links)
+        serial_tools_layout.addWidget(self.lookup_links)
+        serial_layout.addWidget(self.serial_tools)
+        self.make.textChanged.connect(self._update_lookup_row)
         self.lookup_hint = QLabel()
         self.lookup_hint.setObjectName("fieldHint")
         self.lookup_hint.setWordWrap(True)
@@ -489,10 +543,15 @@ class LotForm(QWidget):
         self.barrel_length = QLineEdit()
         self.barrel_length.setPlaceholderText(strings.BARREL_PLACEHOLDER)
         self.barrel_length.editingFinished.connect(self._apply_title_fields)
+        self.c_and_r = QCheckBox(strings.C_AND_R_CHECK)
+        self.c_and_r.setObjectName("fieldCheck")
+        self.c_and_r.setToolTip(strings.C_AND_R_TIP)
+        # clicked, not toggled: only the user's choice rewrites the title.
+        self.c_and_r.clicked.connect(self._apply_title_fields)
 
         # One card for what the item is, three short fields to a row when
         # there's room, so the listing below needs no scrolling to reach.
-        id_card, id_layout = _card(strings.IDENTIFICATION_CARD)
+        self.identification_card, id_layout = _card(strings.IDENTIFICATION_CARD)
         id_layout.addWidget(
             _FieldGrid(
                 [
@@ -502,6 +561,7 @@ class LotForm(QWidget):
                     (_field(strings.GUN_TYPE, self.gun_type), False),
                     (_field(strings.BARREL_LENGTH, self.barrel_length), False),
                     (_field(strings.YEAR, self.year), False),
+                    (_field(strings.C_AND_R, self.c_and_r), False),
                     (_field(strings.SERIAL, serial_box, buddy=self.serial), True),
                     (self.lookup_hint, True),
                 ],
@@ -514,22 +574,18 @@ class LotForm(QWidget):
         self._custom_grid: _FieldGrid | None = None
         self.custom_card.hide()
 
-        # Listing: what bidders read. Condition, CA legality and C&R all
-        # write into the title, so they sit together right above it.
+        # Listing: condition and CA legality stay side by side above the title.
         self.condition = QComboBox()
         self.condition.setPlaceholderText(strings.PICK_CONDITION)
         self.condition.activated.connect(self._apply_condition)
         self.ca_legality = QComboBox()
-        self.ca_legality.addItems(CA_LEGALITY)
+        for value in CA_LEGALITY:
+            self.ca_legality.addItem(CA_TITLE_TEXT.get(value, value), value)
         self.ca_legality.activated.connect(self._apply_title_fields)
-        self.c_and_r = QCheckBox(strings.C_AND_R_CHECK)
-        self.c_and_r.setObjectName("fieldCheck")
-        self.c_and_r.setToolTip(strings.C_AND_R_TIP)
-        # clicked, not toggled: only the user's choice rewrites the title.
-        self.c_and_r.clicked.connect(self._apply_title_fields)
         self.title = QLineEdit()
         self.title.setPlaceholderText(strings.TITLE_PLACEHOLDER)
         self.title.setMaxLength(TITLE_MAX_LENGTH)
+        self.title_scroll = ScrollableLineEdit(self.title)
         self.title.editingFinished.connect(self._apply_condition)
         self.title.textChanged.connect(self._update_heading)
         self.title_count = QLabel()
@@ -545,24 +601,24 @@ class LotForm(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
         )
         self.desc.setTabChangesFocus(True)
-        listing_card, listing_layout = _card(strings.LISTING_CARD)
+        self.listing_card, listing_layout = _card(strings.LISTING_CARD)
         listing_layout.addWidget(
             _FieldGrid(
                 [
                     (_field(strings.CONDITION, self.condition), False),
                     (_field(strings.CA_LEGALITY, self.ca_legality), False),
-                    (_field(strings.C_AND_R, self.c_and_r), False),
                     (
                         _field(
                             strings.TITLE,
-                            self.title,
+                            self.title_scroll,
                             self.title_count,
+                            buddy=self.title,
                             auto_tip=strings.TITLE_AUTO_TIP,
                         ),
                         True,
                     ),
                 ],
-                max_columns=3,
+                max_columns=2,
             )
         )
         # The description takes whatever height is left, so a tall window
@@ -572,16 +628,23 @@ class LotForm(QWidget):
         )
 
         # Photos: a drop area with thumbnails.
-        photos_card, photos_layout = _card(strings.PHOTOS_CARD)
+        self.photos_card, photos_layout = _card(strings.PHOTOS_CARD)
         add_photos = QPushButton(strings.ADD_PHOTOS)
         theme.set_icon(add_photos, "plus")
         add_photos.clicked.connect(self._pick_photos)
         photos_title_row = photos_layout.itemAt(0).widget()
         photos_layout.removeWidget(photos_title_row)
-        photo_bar = QHBoxLayout()
-        photo_bar.addWidget(photos_title_row, 1)
+        photo_actions = QWidget()
+        photo_bar = FlowLayout(photo_actions)
+        photo_bar.setSpacing(8)
+        photo_bar.addWidget(photos_title_row)
         photo_bar.addWidget(add_photos)
-        photos_layout.insertLayout(0, photo_bar)
+        photo_tools = QPushButton("Photo tools")
+        photo_menu = QMenu(photo_tools)
+        photo_menu.addAction("Phone photo intake…", self.phone_requested.emit)
+        photo_tools.setMenu(photo_menu)
+        photo_bar.addWidget(photo_tools)
+        photos_layout.insertWidget(0, photo_actions)
         self.photo_drop = _PhotoDrop()
         self.photo_drop.dropped.connect(self._add_photos)
         drop_layout = QVBoxLayout(self.photo_drop)
@@ -635,8 +698,9 @@ class LotForm(QWidget):
         self.book_no.setPlaceholderText(strings.BOOK_PLACEHOLDER)
         self.owner.editingFinished.connect(self._apply_title_fields)
         self.book_no.editingFinished.connect(self._apply_title_fields)
-        owner_card, owner_layout = _card(strings.CONSIGNMENT_CARD)
-        owner_layout.addWidget(
+        self.consignment = _Disclosure(strings.CONSIGNMENT_CARD)
+        self.consignment.set_expanded(True)
+        self.consignment.body.addWidget(
             _FieldGrid(
                 [
                     (_field(strings.OWNER, self.owner), False),
@@ -645,23 +709,28 @@ class LotForm(QWidget):
             )
         )
 
-        # Details on the left, photos and consignment on the right; stacked
-        # in one column when the window (or the research panel) leaves less room.
+        # Identification and Listing share a row and equal dimensions. Photos
+        # sit below Identification; both rows stack in narrow windows.
+        self.top_cards = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.top_cards.setSpacing(14)
+        self.top_cards.addWidget(self.identification_card, 1)
+        self.top_cards.addWidget(self.listing_card, 1)
         details = QVBoxLayout()
         details.setSpacing(14)
-        details.addWidget(id_card)
+        details.addWidget(self.photos_card, 1)
         details.addWidget(self.custom_card)
-        # The listing card stretches to the bottom of the window.
-        details.addWidget(listing_card, 1)
         aside = QVBoxLayout()
         aside.setSpacing(14)
-        aside.addWidget(photos_card)
-        aside.addWidget(owner_card)
+        aside.addWidget(self.consignment)
+        self.duplicate_button = QPushButton()
+        self.duplicate_button.clicked.connect(self.duplicates_requested)
+        self.duplicate_button.hide()
+        aside.addWidget(self.duplicate_button)
         aside.addStretch(1)
         self.columns = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self.columns.setSpacing(14)
-        self.columns.addLayout(details, 3)
-        self.columns.addLayout(aside, 2)
+        self.columns.addLayout(details, 1)
+        self.columns.addLayout(aside, 1)
 
         column = QWidget()
         column.setMaximumWidth(theme.CONTENT_MAX_WIDTH)
@@ -669,7 +738,8 @@ class LotForm(QWidget):
         col_layout.setContentsMargins(0, 0, 0, 0)
         col_layout.setSpacing(16)
         col_layout.addLayout(header)
-        col_layout.addLayout(self.columns, 1)
+        col_layout.addLayout(self.top_cards, 1)
+        col_layout.addLayout(self.columns)
 
         body = QWidget()
         body.setObjectName("scrollBody")
@@ -682,6 +752,7 @@ class LotForm(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(body)
+        self.scroll = scroll
         return scroll
 
     def resizeEvent(self, event) -> None:
@@ -696,6 +767,7 @@ class LotForm(QWidget):
             if width >= theme.TWO_COLUMN_WIDTH
             else QBoxLayout.Direction.TopToBottom
         )
+        self.top_cards.setDirection(self.columns.direction())
         # Small editor: less padding around the cards.
         side = 14 if width < 600 else 24
         self._body_layout.setContentsMargins(side, 16 if side == 14 else 18, side, 20)
@@ -743,6 +815,8 @@ class LotForm(QWidget):
         self.serial.setText(lot.serial)
         self._fill_conditions(lot.condition)
         self._applied_condition = lot.condition
+        option = find_option(self._conditions, lot.condition)
+        self._applied_condition_note = option.note if option else ""
         self.title.setText(lot.title)
         self.desc.setPlainText(lot.desc)
         self.owner.setText(lot.owner)
@@ -766,8 +840,9 @@ class LotForm(QWidget):
             self.barrel_length,
         ):
             field.setCursorPosition(0)
-        self.ca_legality.setCurrentText(lot.ca_legality)
+        self.ca_legality.setCurrentIndex(self.ca_legality.findData(lot.ca_legality))
         self.c_and_r.setChecked(lot.c_and_r)
+        self.consignment.set_expanded(True)
         for key, edit in self._custom_inputs.items():
             edit.setText(lot.custom.get(key, ""))
             edit.setCursorPosition(0)
@@ -785,6 +860,7 @@ class LotForm(QWidget):
         self._refresh_photos()
         self._update_heading()
         self.stack.setCurrentIndex(1)
+        self._review_identity = self._identification_key()
         self._loading = False
         self._dirty = False
         self.set_save_state("saved", strings.ALL_SAVED)
@@ -909,15 +985,16 @@ class LotForm(QWidget):
             book_no=self.book_no.text().strip(),
             year=int(year) if year.isdigit() else None,
             photos=list(self._photos),
-            make=self.make.text().strip(),
-            model=self.model.text().strip(),
+            make=title_case_name(self.make.text()),
+            model=title_case_name(self.model.text()),
             barrel_length=self.barrel_length.text().strip(),
             caliber=self.caliber.text().strip(),
             gun_type=self.gun_type.currentText().strip(),
-            ca_legality=self.ca_legality.currentText(),
+            ca_legality=self.ca_legality.currentData() or "N/A",
             c_and_r=self.c_and_r.isChecked(),
             title_fields=list(self._title_fields),
             custom=self._collect_custom(),
+            dossier=deepcopy(self._lot.dossier),
         )
 
     def collect_for_save(self) -> Lot:
@@ -1008,12 +1085,42 @@ class LotForm(QWidget):
         self.condition.setCurrentIndex(self.condition.findText(match) if match else -1)
         self.condition.blockSignals(False)
 
-    def _mark_dirty(self) -> None:
+    def _mark_dirty(self, *, invalidate_review: bool = True) -> None:
         if self._loading or self._lot is None:
             return
+        identity = self._identification_key()
+        if invalidate_review and self._lot.dossier:
+            packet = deepcopy(self._lot.dossier)
+            packet["review_approved"] = False
+            if identity != self._review_identity:
+                packet["status"] = "Unverified"
+                packet["research_complete"] = False
+            self._lot = replace(self._lot, dossier=packet)
+        self._review_identity = identity
         self._dirty = True
         self.set_save_state("pending", strings.SAVING)
         self.changed.emit()
+
+    def _identification_key(self) -> tuple:
+        return tuple(
+            edit.text()
+            for edit in (
+                self.make,
+                self.model,
+                self.serial,
+                self.year,
+                self.caliber,
+                self.barrel_length,
+                self.gun_type.lineEdit(),
+            )
+        )
+
+    def _photos_changed(self) -> None:
+        if self._lot is not None and self._lot.dossier:
+            packet = deepcopy(self._lot.dossier)
+            packet["required_shots"] = []
+            self._lot = replace(self._lot, dossier=packet)
+        self._mark_dirty()
 
     def _update_title_count(self) -> None:
         """e.g. "87/100", red when the generated parts would trim the title."""
@@ -1067,45 +1174,77 @@ class LotForm(QWidget):
             self.title.setText(title)
         option = find_option(self._conditions, condition)
         text = self.desc.toPlainText()
-        # A condition that's been removed from Settings has no sentence to
-        # write, so the description is left as it is. An unchanged condition
-        # only refreshes a sentence that's there (e.g. new wording).
+        # Never rewrite user edits just because a title field finished editing
+        # or the lot reopened. Refresh only a changed condition or changed
+        # configured wording, and preserve a condition line the user deleted.
+        note = option.note if option else ""
+        previous = f"Condition: {self._applied_condition}. {self._applied_condition_note}".strip()
+        owns_condition = bool(self._applied_condition) and any(
+            line == previous or line.startswith(previous + " ")
+            for line in text.splitlines()
+        )
         if (option is not None or not condition) and (
-            condition != self._applied_condition
-            or has_condition_line(text, [condition])
+            (not self._applied_condition and condition)
+            or (
+                owns_condition
+                and (
+                    condition != self._applied_condition
+                    or note != self._applied_condition_note
+                )
+            )
         ):
-            note = option.note if option else ""
-            desc = condition_desc(text, condition, note, known)
+            desc = condition_desc(
+                text,
+                condition,
+                note,
+                known,
+                known_notes=[
+                    self._applied_condition_note,
+                    *(o.note for o in self._conditions),
+                ],
+            )
             if desc != text:
                 self.desc.setPlainText(desc)
         self._applied_condition = condition
+        self._applied_condition_note = note
 
     def _apply_title_fields(self) -> None:
         """Synchronize the title fields and the description's field lines."""
         if self._lot is None or self._loading:
             return
+        for edit in (self.make, self.model):
+            value = title_case_name(edit.text())
+            if value != edit.text():
+                position = edit.cursorPosition()
+                edit.setText(value)
+                edit.setCursorPosition(min(position, len(value)))
         self._apply_desc_fields(self.collect())
         self._apply_condition()
 
     def _apply_desc_fields(self, current: Lot) -> None:
-        """Rewrite the "Label: value" lines at the top of the description when
-        the chosen fields, their labels or their values changed. A line the
-        user deleted stays deleted until its value (or label) changes."""
+        """Update only intact generated lines; manual edits always take priority."""
         label_for = labels(self._custom_fields)
         new = desc_line_map(current, self._desc_fields, label_for)
         new_labels = {k: label_for[k] for k in self._desc_fields}
         if new == self._applied_desc_lines and new_labels == self._applied_desc_labels:
             return
         text = self.desc.toPlainText()
+        present = set(text.splitlines())
         lines = [
             line
             for key, line in new.items()
-            if line != self._applied_desc_lines.get(key)
-            or has_desc_line(text, self._applied_desc_labels.get(key, ""))
+            if self._applied_desc_lines.get(key) in present
+            or (
+                key not in self._applied_desc_lines
+                and not has_desc_line(text, new_labels[key])
+            )
         ]
-        # Remove lines written earlier (also under old labels), keep the rest.
-        known = [*new_labels.values(), *self._applied_desc_labels.values()]
-        desc = update_desc(text, known, lines)
+        desc = update_desc(
+            text,
+            [],
+            lines,
+            replace_exact=list(self._applied_desc_lines.values()),
+        )
         if desc != text:
             self.desc.setPlainText(desc)
         self._applied_desc_lines = new
@@ -1131,6 +1270,7 @@ class LotForm(QWidget):
     def _update_lookup_row(self, *_args) -> None:
         """Lookup buttons work once there's a serial; the hint shows results."""
         has_serial = bool(self.serial.text().strip())
+        self.serial_tools.setVisible(True)
         for button, link in self._link_buttons:
             button.setEnabled(has_serial)
             button.setToolTip(
@@ -1178,10 +1318,50 @@ class LotForm(QWidget):
         self._on_serial_done()
 
     def _open_link(self, link: SerialLink) -> None:
+        if "{serial}" not in link.url:
+            QApplication.clipboard().setText(self.serial.text().strip())
         url = build_url(
             link.url, self.serial.text(), self.title.text(), self.make.text()
         )
         QDesktopServices.openUrl(QUrl(url))
+
+    def set_dossier(self, packet: dict) -> None:
+        if self._lot is not None:
+            self._lot = replace(self._lot, dossier=dossier.validate(packet))
+            self._mark_dirty(invalidate_review=False)
+
+    def add_research(self, record: dict) -> None:
+        if self._lot is not None:
+            packet = dossier.validate(self._lot.dossier)
+            packet["research"].append(record)
+            packet["review_approved"] = False
+            packet["research_complete"] = False
+            self.set_dossier(packet)
+
+    def add_photos(self, files: list[Path]) -> None:
+        self._add_photos(files)
+
+    def set_duplicates(self, count: int) -> None:
+        self.duplicate_button.setText(
+            f"Review {count} possible duplicate / relisting match(es)…"
+        )
+        self.duplicate_button.setVisible(count > 0)
+
+    def focus_issue(self, target: str) -> None:
+        widgets = {
+            "title": self.title,
+            "condition": self.condition,
+            "make": self.make,
+            "model": self.model,
+            "photos": self.photo_drop,
+        }
+        if widget := widgets.get(target):
+            self.scroll.ensureWidgetVisible(widget)
+            widget.setFocus()
+        elif target == "duplicates":
+            self.duplicates_requested.emit()
+        else:
+            self.evidence_requested.emit()
 
     def _pick_photos(self) -> None:
         patterns = " ".join(f"*{suffix}" for suffix in PHOTO_SUFFIXES)
@@ -1194,7 +1374,7 @@ class LotForm(QWidget):
         if files and self._lot is not None:
             self._photos.extend(files)
             self._refresh_photos()
-            self._mark_dirty()
+            self._photos_changed()
 
     def _remove_selected_photo(self) -> None:
         rows = sorted(
@@ -1205,7 +1385,7 @@ class LotForm(QWidget):
             del self._photos[row]
         if rows:
             self._refresh_photos()
-            self._mark_dirty()
+            self._photos_changed()
 
     def _refresh_photos(self) -> None:
         self.photo_list.clear()

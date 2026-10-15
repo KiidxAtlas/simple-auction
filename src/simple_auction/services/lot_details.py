@@ -1,10 +1,11 @@
 """Lot fields that aren't Excel columns, in a side file per auction."""
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from simple_auction.models import Lot
-from simple_auction.services import storage
+from simple_auction.services import dossier, storage
 from simple_auction.services.title_layout import validate, validate_values
 
 _DEFAULTS = {
@@ -17,9 +18,10 @@ _DEFAULTS = {
     "c_and_r": False,
     "title_fields": None,
     "custom": {},
+    "dossier": {},
 }
 _FIELDS = tuple(_DEFAULTS)
-_STRUCTURED = {"title_fields", "custom"}
+_STRUCTURED = {"title_fields", "custom", "dossier"}
 _FLAGS = {"c_and_r"}  # true/false values
 
 
@@ -59,7 +61,9 @@ def _read(path: Path) -> dict[str, dict]:
                 validate(entry["title_fields"])
             if "custom" in entry:
                 validate_values(entry["custom"])
-    except ValueError as e:
+            if "dossier" in entry:
+                dossier.validate(entry["dossier"])
+    except (ValueError, TypeError) as e:
         raise DetailsFileError(f"Invalid title layout in {path}: {e}") from e
     return data
 
@@ -77,6 +81,7 @@ def prepare(path: Path, lots: list[Lot]) -> bytes:
     """Validate and encode updates without modifying the sidecar."""
     data = _read(path)
     for lot in lots:
+        dossier.validate(lot.dossier)
         entry = {
             name: getattr(lot, name)
             for name in _FIELDS
@@ -102,7 +107,7 @@ def fill(path: Path, lots: list[Lot]) -> None:
     for lot in lots:
         for name in _FIELDS:
             value = data.get(str(lot.lot_number), {}).get(name, _DEFAULTS[name])
-            setattr(lot, name, dict(value) if name == "custom" else value)
+            setattr(lot, name, deepcopy(value))
 
 
 def save(path: Path, lot: Lot) -> None:

@@ -163,6 +163,7 @@ def validated_lot(data):
         "c_and_r": False,
         "title_fields": None,
         "custom": {},
+        "dossier": {},
         **data,
     }
     fields = set(lot_data(Lot(1)))
@@ -177,7 +178,8 @@ def validated_lot(data):
     if any(
         not isinstance(v, str) or len(v) > 100_000
         for k, v in data.items()
-        if k not in {"year", "lot_number", "title_fields", "custom", "c_and_r"}
+        if k
+        not in {"year", "lot_number", "title_fields", "custom", "c_and_r", "dossier"}
     ):
         raise ValueError("Invalid lot text")
     if data["ca_legality"] not in {"N/A", "Legal for CA", "Not CA legal"}:
@@ -189,6 +191,9 @@ def validated_lot(data):
     if data["title_fields"] is not None:
         validate(data["title_fields"])
     data["custom"] = validate_values(data["custom"])
+    from simple_auction.services import dossier
+
+    dossier.validate(data["dossier"])
     return Lot(**data)
 
 

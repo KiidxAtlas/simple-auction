@@ -108,6 +108,8 @@ class ListEditor(QWidget):
             else:
                 edit = QLineEdit()
                 edit.textChanged.connect(self._store)
+            if field.key == "url":
+                edit.setProperty("spellcheck", False)
             edit.setPlaceholderText(field.placeholder)
             edit.setAccessibleName(field.label)
             label.setBuddy(edit)

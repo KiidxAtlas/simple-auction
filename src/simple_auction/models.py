@@ -29,3 +29,5 @@ class Lot:
     title_fields: list[str] | None = None
     # Values of the custom fields defined in Settings: {field id: text}.
     custom: dict[str, str] = field(default_factory=dict)
+    # Portable identification evidence, research and publication review state.
+    dossier: dict = field(default_factory=dict)

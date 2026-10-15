@@ -4,6 +4,7 @@
 
 QWidget {
     color: $text;
+    font-family: "$font_family";
     font-size: ${fs_body}px;
 }
 

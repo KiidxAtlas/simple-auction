@@ -1,6 +1,9 @@
+import json
+
 from simple_auction.services.config import Config
 from simple_auction.services.serial_links import (
     DEFAULT_LINKS,
+    OFFICIAL_LINKS,
     SerialLink,
     build_url,
     from_json,
@@ -27,6 +30,14 @@ def test_placeholder_in_path_and_title():
     assert url == "https://example.com/s/AB%2F1?q=Colt%201911"
 
 
+def test_ruger_prefill_preserves_serial_and_drops_blank_query():
+    template = next(link.url for link in DEFAULT_LINKS if link.name == "Ruger official")
+    assert build_url(template, " 001-AB /23&x ") == (
+        "https://ruger.com/dataProcess/serialHistory/?serial=001-AB%20%2F23%26x"
+    )
+    assert build_url(template, " ") == "https://ruger.com/dataProcess/serialHistory/"
+
+
 def test_from_json_skips_invalid_and_defaults_when_missing():
     links = from_json(
         [
@@ -47,3 +58,22 @@ def test_config_roundtrip_keeps_links(tmp_path):
     cfg.serial_links = [SerialLink("Mine", "https://m.com/?s={serial}")]
     cfg.save(path)
     assert Config.load(path).serial_links == cfg.serial_links
+
+
+def test_upgrade_adds_official_links_once_and_preserves_custom_rows(tmp_path):
+    path = tmp_path / "config.json"
+    custom = SerialLink("My site", "https://example.com/{serial}")
+    colt = SerialLink("Colt official", "https://example.com/custom-colt")
+    cfg = Config(base_dir=tmp_path, photos_dir=tmp_path, serial_links=[custom, colt])
+    cfg.save(path)
+    data = json.loads(path.read_text())
+    del data["serial_links_configurable"]
+    path.write_text(json.dumps(data))
+    upgraded = Config.load(path)
+    assert upgraded.serial_links == [custom, colt, *OFFICIAL_LINKS[1:]]
+    upgraded.serial_links = [custom]
+    upgraded.save(path)
+    assert Config.load(path).serial_links == [custom]
+    upgraded.serial_links = []
+    upgraded.save(path)
+    assert Config.load(path).serial_links == []

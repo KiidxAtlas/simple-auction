@@ -91,6 +91,74 @@ def test_worker_propagates_error_and_restores_ui(app):
     app.processEvents()
 
 
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        " Includes case and two magazines.",
+        "\nIncludes case.",
+        "\n\nIncludes case.\nProvenance added by staff.",
+    ],
+)
+def test_description_after_condition_survives_edit_save_and_reopen(window, suffix):
+    window.create_auction()
+    auction, number = window.auction_no, window.lot_no
+    form = window.form
+    form.title.setText("First lot")
+    form.condition.setCurrentText("Good")
+    form._apply_condition()
+    expected = form.desc.toPlainText() + suffix
+    form.desc.setPlainText(expected)
+    form.title.editingFinished.emit()
+    assert form.desc.toPlainText() == expected
+    assert window.flush()
+    window.create_lot(auction)
+    window.open_lot(auction, number)
+    assert form.desc.toPlainText() == expected
+    assert (
+        catalogue.load(window._path(auction), window._details(auction))[0].desc
+        == expected
+    )
+
+
+def test_custom_condition_rewording_preserves_inline_and_following_user_notes(window):
+    from simple_auction.services.conditions import ConditionOption
+
+    window.create_auction()
+    form = window.form
+    form.set_conditions([ConditionOption("Custom", "Original condition sentence.")])
+    form.condition.setCurrentText("Custom")
+    form._apply_condition()
+    form.desc.setPlainText(
+        form.desc.toPlainText() + " Includes case.\n\nKeep my notes."
+    )
+    form.set_conditions([ConditionOption("Custom", "Updated condition sentence.")])
+    assert (
+        form.desc.toPlainText()
+        == "Condition: Custom. Updated condition sentence. Includes case.\n\nKeep my notes."
+    )
+    form.condition.setCurrentIndex(-1)
+    form._apply_condition()
+    assert form.desc.toPlainText() == "Includes case.\n\nKeep my notes."
+
+
+def test_manually_edited_condition_sentence_is_not_rebuilt_on_reopen(window):
+    window.create_auction()
+    auction, number = window.auction_no, window.lot_no
+    form = window.form
+    form.condition.setCurrentText("Good")
+    form._apply_condition()
+    expected = (
+        "Condition: Good. Personally inspected, with additional details at the end."
+    )
+    form.desc.setPlainText(expected)
+    form.title.editingFinished.emit()
+    assert form.desc.toPlainText() == expected
+    assert window.flush()
+    window.create_lot(auction)
+    window.open_lot(auction, number)
+    assert form.desc.toPlainText() == expected
+
+
 def test_create_edit_flush_navigate_and_delete_work_end_to_end(window, monkeypatch):
     window.create_auction()
     auction_no, lot_no = window.auction_no, window.lot_no

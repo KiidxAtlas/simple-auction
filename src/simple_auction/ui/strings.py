@@ -113,11 +113,12 @@ RESEARCH_SUBTITLE = "Lot #{n}"
 RESEARCH_START = "Research this lot"
 RESEARCH_EMPTY_TITLE = "Look up this gun"
 RESEARCH_START_HINT = (
-    "Uses the lot's details and, unless switched off below, up to 6 of its "
-    "photos. Owner and book # are not sent."
+    "Get a short identification note and what to verify next. "
+    "Details and enabled photos go to Google Gemini; owner and book # stay local. "
+    "Ask a follow-up for more detail."
 )
 RESEARCH_TURN_LABEL = "Research this lot"
-RESEARCH_INCLUDE_PHOTOS = "Send photos"
+RESEARCH_INCLUDE_PHOTOS = "Include photos in research"
 RESEARCH_INCLUDE_PHOTOS_TIP = (
     "Let Gemini see up to 6 of the lot's photos (sent again only when they change)"
 )

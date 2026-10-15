@@ -47,6 +47,7 @@ class ShippingImportDialog(QDialog):
         self.auction = QLineEdit(path.stem)
         self.auction.setPlaceholderText("Auction name")
         self.country = QLineEdit("US")
+        self.country.setProperty("spellcheck", False)
         self.country.setMaxLength(2)
         self.country.setMaximumWidth(75)
         basic.addWidget(QLabel("Save auction as"), 0, 0)

@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.1.9 — 2026-10-15
+
+### Added
+
+- App-wide OpenDyslexic reading-font toggle and Small/Medium/Large text sizes in
+  Appearance, with a preview, persistent preferences and bundled licensed fonts.
+- Offline English spelling with red underlines, right-click suggestions,
+  undoable replacements, session ignore and a persistent personal dictionary.
+- Always-visible official serial links alongside configurable lookup links,
+  including automatic serial prefill for Ruger.
+- Portable identification evidence, supporting photo/PDF attachments, research
+  packets, staff questions, sold/asking comparables and publication review.
+- Actionable readiness queue and non-blocking duplicate/relisting review with
+  explicit research reuse and approval invalidation after material edits.
+- Expiring, private-network QR phone photo intake with guided shots and desktop
+  review, plus explicit photo-identification disclosure and reviewed suggestions.
+- Consistent full backup, validated non-destructive restore, visible backup
+  status, and owner-filtered consignor PDF review sheets.
+
+### Changed
+
+- CA legality now displays LEGAL FOR CA / NOT LEGAL FOR CA, including generated
+  titles; older title wording is recognised without duplicating qualifiers.
+- Identification and Listing align as equal-sized cards on wide windows, with
+  Photos below Identification and Consignment expanded by default.
+- Research photo sharing starts off for each lot, labelled "Include photos in
+  research" above Research tools; Identify from photos is beside Research tools.
+- Removed the secondary photo-sharing hint beneath the research photo checkbox;
+  explicit photo identification still asks for consent.
+- Moved C&R into Identification and CA legality beside Condition in Listing,
+  removing the separate Listing options disclosure without changing saved values.
+- Long titles now have a horizontal scrollbar, sideways trackpad scrolling and
+  Shift+wheel support, without changing text, selection or normal page scrolling.
+- Spell checking now covers editable lot text fields, including make, model,
+  caliber, serial and custom fields, not only listing prose.
+- Removed Cody and Colt Archives, the lookup disclosure and More lookup sources
+  menu, and the separate Copy serial button.
+- Auction workbooks and exports use Lot Number, Title, Description, Owner,
+  Book Number, Serial, Condition and Year order; older workbooks still load.
+- All serial lookup sites are managed in Settings, including the official defaults;
+  edits, reordering and removals persist without hard-coded links reappearing.
+
+### Fixed
+
+- Description edits after the condition sentence are preserved, including text
+  on the same line. Reopening a lot or finishing a title edit no longer rebuilds
+  an unchanged condition sentence; condition/template changes retain user notes.
+- Deleted or partially edited description fields stay user-owned even when the
+  corresponding make, model, caliber or condition changes.
+- Make and model entries capitalize each word's initial letter on finishing an
+  edit and on save, while retaining existing model-code capitalization.
+- Scrolling over a closed dropdown no longer changes its selection, even when
+  it has focus. Page scrolling, keyboard selection and open popup lists still work.
+
 ## 0.1.8 — 2026-10-14
 
 ### Changed
