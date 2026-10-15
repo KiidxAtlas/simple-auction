@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The test suite explicitly disposes of remaining Qt widgets and shuts down its
+  shared application before interpreter finalization, preventing the Linux
+  segmentation fault after all tests passed.
+
 ## 0.1.10 — 2026-10-15
 
 ### Fixed
