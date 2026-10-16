@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from simple_auction.models import Lot
-from simple_auction.services import api_key, lookup, numbering
+from simple_auction.services import api_key, lookup, numbering, output
 from simple_auction.services.conditions import ConditionOption, cleaned, save_file
 from simple_auction.services.config import Config
 from simple_auction.services.listing import condition_desc
@@ -81,6 +81,7 @@ class SettingsDialog(QDialog):
         self.setMinimumSize(720, 480)
         self._original_conditions = list(config.conditions)
         self._conditions_path = config.conditions_path
+        self._history_access = config.history_access
 
         self.network = NetworkSettings(config.sharing, self)
         self.nav = QListWidget()
@@ -570,7 +571,19 @@ class SettingsDialog(QDialog):
         section.layout().addLayout(key_row)
         section.layout().addWidget(self.key_state)
         section.layout().addWidget(get_key, 0, Qt.AlignmentFlag.AlignLeft)
+        self.history_state = QLabel()
+        self.history_state.setObjectName("fieldHint")
+        self.history_state.setWordWrap(True)
+        self.lock_history = QPushButton(strings.LOCK_HISTORY)
+        theme.set_icon(self.lock_history, "close")
+        self.lock_history.clicked.connect(self._lock_history)
+        history_row = QHBoxLayout()
+        history_row.addWidget(self.history_state, 1)
+        history_row.addWidget(self.lock_history)
+        section.layout().addLayout(history_row)
+        self.key.textChanged.connect(self._refresh_history_state)
         self._refresh_key_state()
+        self._refresh_history_state()
         return section
 
     # -- building blocks ----------------------------------------------------
@@ -678,7 +691,13 @@ class SettingsDialog(QDialog):
 
     def new_api_key(self) -> str | None:
         """A key typed in, or None to keep the current one."""
-        return self.key.text().strip() or None
+        text = self.key.text().strip()
+        # The access key unlocks the Output page; it is never an API key.
+        return None if text == output.ACCESS_KEY else (text or None)
+
+    def history_access(self) -> bool:
+        """Whether the Output page should be available after saving."""
+        return self._history_access or self.key.text().strip() == output.ACCESS_KEY
 
     def serial_links(self) -> list[SerialLink]:
         """The rows that make a usable link (name + http(s) URL)."""
@@ -714,6 +733,18 @@ class SettingsDialog(QDialog):
         api_key.forget()
         self.key.clear()
         self._refresh_key_state()
+
+    def _refresh_history_state(self) -> None:
+        unlocked = self.history_access()
+        self.history_state.setText(strings.HISTORY_UNLOCKED if unlocked else "")
+        self.history_state.setVisible(unlocked)
+        self.lock_history.setVisible(unlocked)
+
+    def _lock_history(self) -> None:
+        self._history_access = False
+        if self.key.text().strip() == output.ACCESS_KEY:
+            self.key.clear()
+        self._refresh_history_state()
 
     def _open_conditions_file(self) -> None:
         """Open conditions.yaml in the default text editor (or show it in the

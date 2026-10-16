@@ -58,6 +58,21 @@ future edits, rather than rewriting every saved lot. **Appearance**, **Sharing**
 **Folders** and **Research** (the Gemini API key) follow. **Save** applies all
 sections; **Cancel** discards pending changes.
 
+### Output and daily work
+
+Output is unlocked privately: type the access word into the Gemini API key field
+in **Settings → Research** and save. The word is never stored as an API key, so
+your saved Gemini key is kept. **Lock history** hides Output again.
+
+Output distinguishes lots with information started from lots whose information
+is filled out. Photos can be added later; publication readiness is a separate
+measure. Blank, untouched lots and deleted lots do not contribute to output.
+Repeated saves of the same lot do not create additional daily output.
+
+Use **Settings → Sharing** to connect your computers. Output history travels
+through that connection alongside the catalogue, rather than requiring a
+cloud-synced folder. Both computers must run the same app version.
+
 The lot editor includes **Caliber**, **Type** (Rifle, Shotgun or Handgun, or type
 your own), optional **Barrel length** (enter the units with the value) and **CA
 legality**: **LEGAL FOR CA**, **NOT LEGAL FOR CA**, or **N/A** (the default). These are

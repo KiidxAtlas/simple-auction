@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.1.11 — 2026-10-16
+
+### Added
+
+- Daily output distinguishes lots with meaningful saved information from lots
+  with their information filled out; photos and publication approval are separate.
+  Blank, unchanged lots and deleted lots are excluded, and repeated saves do not
+  inflate output. The header shows both daily counts.
+- Output stays hidden until unlocked privately from the Gemini API key field in
+  Settings → Research; the access word is never saved as an API key.
+- Output history synchronizes through local network sharing so connected
+  computers show the same KPIs.
+- Output shows daily/weekly/monthly totals, in-progress work, streaks, pace,
+  a 30-day trend, weekday/hour charts, daily history and auction progress.
 
 ### Fixed
 

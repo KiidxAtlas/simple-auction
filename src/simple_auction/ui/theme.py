@@ -119,6 +119,7 @@ ICONS = {
     "gavel": (
         "M14 13l-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10M16 16l6-6M8 8l6-6M9 7l8 8M21 11l-8-8"
     ),
+    "chart": "M18 20V10M12 20V4M6 20v-6",
 }
 
 # Widgets showing an icon, so a theme switch can redraw them in its colors.

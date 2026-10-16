@@ -75,6 +75,9 @@ class Config:
     desc_fields: list[str] = field(default_factory=lambda: list(DEFAULT_DESC_FIELDS))
     # Fields added in Settings → Listing fields (values are kept per lot).
     custom_fields: list[CustomField] = field(default_factory=list)
+    # Unlocked by entering the access key in Settings → Research; shows the
+    # Output (history) page in the header.
+    history_access: bool = False
 
     @property
     def auctions_dir(self) -> Path:
@@ -121,6 +124,9 @@ class Config:
         if dark_mode is not None and type(dark_mode) is not bool:
             raise TypeError("dark_mode must be true, false or null")
         dyslexic_font = data.get("dyslexic_font", False)
+        history_access = data.get("history_access", False)
+        if type(history_access) is not bool:
+            raise TypeError("history_access must be true or false")
         font_size = data.get("font_size", "medium")
         if type(dyslexic_font) is not bool:
             raise TypeError("dyslexic_font must be true or false")
@@ -156,6 +162,7 @@ class Config:
             ),
             dark_mode=dark_mode,
             dyslexic_font=dyslexic_font,
+            history_access=history_access,
             font_size=font_size,
             sharing=sharing,
             title_fields=title_fields,
@@ -193,6 +200,7 @@ class Config:
             "dark_mode": self.dark_mode,
             "dyslexic_font": self.dyslexic_font,
             "font_size": self.font_size,
+            "history_access": self.history_access,
             "sharing": vars(self.sharing),
             "title_fields": self.title_fields,
             "desc_fields": self.desc_fields,

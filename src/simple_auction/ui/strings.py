@@ -439,4 +439,11 @@ ALREADY_RUNNING = "Another Simple Auction instance is running, or the settings f
 DARK_MODE = "Dark mode"
 SHIPPING_NAV = "Shipping"
 CATALOGUE_NAV = "Catalogue"
+OUTPUT_NAV = "Output"
+COMPLETED_TODAY = "{lots} completed today"
+COMPLETED_TODAY_TIP = (
+    "Lots that became ready to publish today (every check in the work queue passed)."
+)
+HISTORY_UNLOCKED = "History access is on. Output appears in the header."
+LOCK_HISTORY = "Lock history"
 RELOAD_SHARED = "Reload from host"

@@ -19,6 +19,7 @@ import time
 from collections import deque
 from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -35,6 +36,7 @@ from simple_auction.services import (
     image,
     lot_details,
     numbering,
+    output,
     shipping,
     storage,
 )
@@ -244,6 +246,7 @@ class Database:
             ).fetchone()[0]
         self.assets = self.config.photos_dir / ".shared" / self.identity
         self._migrate()
+        self._backfill_output()
 
     @contextmanager
     def connect(self):
@@ -269,6 +272,97 @@ class Database:
             "INSERT INTO records VALUES (?,?,?) ON CONFLICT(kind,key) DO UPDATE SET data=excluded.data",
             (kind, str(key), json.dumps(data, allow_nan=False)),
         )
+        db.execute(
+            "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='revision'"
+        )
+
+    def _backfill_output(self):
+        """Count lots saved before output tracking existed, once."""
+        with self.transaction() as db:
+            if db.execute("SELECT 1 FROM meta WHERE key='output'").fetchone():
+                return
+            for key, raw in db.execute(
+                "SELECT key,data FROM records WHERE kind='lot'"
+            ).fetchall():
+                lot = Lot(**{k: v for k, v in json.loads(raw).items() if k != "photos"})
+                self._set_output(db, int(key.split("/")[0]), lot)
+            db.execute("INSERT INTO meta VALUES ('output','1')")
+
+    def _merge_output(self, db, rows):
+        """Add history counted on a computer before it connected. The dates it
+        was counted on are kept, and the earliest date wins. Only lots that
+        still qualify on the host are added, so a lot that was deleted or
+        cleared on the host is never brought back by an old local copy."""
+        for stage, test in (
+            ("started", output.is_started),
+            ("info", output.is_info_filled),
+        ):
+            for row in rows.get(stage, []):
+                entry = output.OutputLog.decode_row(row)
+                lot_data = self.get(db, "lot", f"{entry.auction}/{entry.lot}")
+                if lot_data is None:
+                    continue
+                lot = Lot(**{k: v for k, v in lot_data.items() if k != "photos"})
+                if not test(lot):
+                    continue
+                key = f"{stage}/{entry.auction}/{entry.lot}"
+                current = self.get(db, "output", key)
+                if current is None or entry.at < datetime.fromisoformat(current["at"]):
+                    self.put(
+                        db,
+                        "output",
+                        key,
+                        {
+                            "at": entry.at.isoformat(),
+                            "title": entry.title,
+                            "gun_type": entry.gun_type,
+                        },
+                    )
+
+    def _set_output(self, db, auction, lot):
+        """Keep the started and info-filled records in step with the lot.
+        The host stamps the time when a stage is first reached; a lot that
+        leaves a stage (cleared) loses its record."""
+        for stage, present in (
+            ("started", output.is_started(lot)),
+            ("info", output.is_info_filled(lot)),
+        ):
+            key = f"{stage}/{auction}/{lot.lot_number}"
+            current = self.get(db, "output", key)
+            if present and current is None:
+                self.put(
+                    db,
+                    "output",
+                    key,
+                    {
+                        "at": output.local_now().isoformat(),
+                        "title": lot.title.strip(),
+                        "gun_type": lot.gun_type.strip(),
+                    },
+                )
+            elif not present and current is not None:
+                db.execute("DELETE FROM records WHERE kind='output' AND key=?", (key,))
+                self._bump(db)
+
+    @staticmethod
+    def _forget_output(db, auction, numbers):
+        """Drop output records for deleted lots (all lots when numbers is None)."""
+        if numbers is None:
+            db.execute(
+                "DELETE FROM records WHERE kind='output' AND (key LIKE ? OR key LIKE ?)",
+                (f"started/{auction}/%", f"info/{auction}/%"),
+            )
+        else:
+            for n in numbers:
+                for stage in ("started", "info"):
+                    db.execute(
+                        "DELETE FROM records WHERE kind='output' AND key=?",
+                        (f"{stage}/{auction}/{n}",),
+                    )
+        Database._bump(db)
+
+    @staticmethod
+    def _bump(db):
         db.execute(
             "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='revision'"
         )
@@ -340,16 +434,28 @@ class Database:
         revision = int(
             db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0]
         )
+        outputs = {"started": [], "info": []}
+        for key, raw in db.execute(
+            "SELECT key,data FROM records WHERE kind='output' ORDER BY key"
+        ):
+            stage, auction, lot = key.split("/")
+            outputs[stage].append(
+                {**json.loads(raw), "auction": int(auction), "lot": int(lot)}
+            )
         return {
             "identity": self.identity,
             "revision": revision,
             "auctions": auctions,
             "shipping": batches,
+            "output": outputs,
         }
 
     def dispatch(self, op, args):
         with self.transaction() as db:
             if op == "snapshot":
+                # A computer uploads its own history before reading the host's.
+                if args.get("output"):
+                    self._merge_output(db, args["output"])
                 return self.snapshot(db)
             if op == "photo":
                 return base64.b64encode(self.asset(args["hash"]).read_bytes()).decode()
@@ -407,6 +513,7 @@ class Database:
                     )
                 if old != updated:
                     self.put(db, "lot", key, updated)
+                self._set_output(db, auction, lot)
                 return updated
             if op == "import_lots":
                 auction = number(args["auction"])
@@ -417,6 +524,7 @@ class Database:
                     key = f"{auction}/{lot.lot_number}"
                     if self.get(db, "lot", key) is None:
                         self.put(db, "lot", key, {**lot_data(lot), "photos": []})
+                        self._set_output(db, auction, lot)
                         added.append(lot_data(lot))
                 return added
             if op == "delete":
@@ -442,6 +550,11 @@ class Database:
                             "DELETE FROM records WHERE kind='lot' AND key=?",
                             (f"{auction}/{number(n)}",),
                         )
+                self._forget_output(
+                    db,
+                    auction,
+                    None if numbers is None else [number(n) for n in numbers],
+                )
                 db.execute(
                     "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='revision'"
                 )
@@ -774,13 +887,15 @@ def find_hosts(timeout=1.5, *, destinations=None):
 
 
 class Client:
-    def __init__(self, address, code, *, identity="", cache=None):
+    def __init__(self, address, code, *, identity="", cache=None, history=None):
         self.address = endpoint(address)
         self.code = code
         self.identity = identity
         self.cache = cache or Path()
         self.timeout = 12
         self._next_discovery = 0.0
+        # Returns this computer's own history to merge on the next snapshot.
+        self.history = history
 
     def request(self, op, **args):
         raw = json.dumps(
@@ -822,9 +937,12 @@ class Client:
         except ValueError as e:
             raise NetworkError("The host sent an invalid response") from e
 
+    def _upload(self):
+        return {"output": self.history()} if self.history else {}
+
     def snapshot(self):
         try:
-            result = self.request("snapshot")
+            result = self.request("snapshot", **self._upload())
         except NetworkError:
             # Reboots can change DHCP addresses. Only reconnect to the saved
             # database identity, then authenticate and verify before adopting it.
@@ -845,7 +963,7 @@ class Client:
                 )
                 candidate.timeout = self.timeout
                 try:
-                    result = candidate.request("snapshot")
+                    result = candidate.request("snapshot", **self._upload())
                 except Unavailable:
                     continue
                 if result["identity"] != self.identity:
@@ -914,6 +1032,7 @@ class LocalClient(Client):
         self.db = db
         self.identity = db.identity
         self.cache = cache
+        self.history = None
         self.address = "local"
         self.code = ""
 

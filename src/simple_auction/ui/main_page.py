@@ -41,10 +41,12 @@ from simple_auction.services import (
     dossier,
     excel,
     importer,
+    kpi,
     lookup,
     lot_details,
     network,
     numbering,
+    output,
     research,
     source_update,
     storage,
@@ -60,6 +62,7 @@ from simple_auction.ui.components.lot_sidebar import LotSidebar, Selection
 from simple_auction.ui.components.research_panel import ResearchPanel
 from simple_auction.ui.import_dialog import ImportDialog
 from simple_auction.ui.network_poll import NetworkPoll
+from simple_auction.ui.output_page import OutputPage
 from simple_auction.ui.settings import SettingsDialog
 from simple_auction.ui.shipping_page import ShippingPage
 from simple_auction.ui.source_update_dialog import SourceCheckThread, SourceUpdateDialog
@@ -124,9 +127,13 @@ class MainPage(QMainWindow):
         if state := self._ui_state.value("splitter"):
             self.splitter.restoreState(state)
         self.shipping = ShippingPage(config.data_dir / "shipping")
+        self.output = output.OutputLog(config.data_dir / output.FILE_NAME)
+        self.output_page = OutputPage()
+        self.output_page.refresh_requested.connect(self.refresh_output)
         self.pages = QStackedWidget()
         self.pages.addWidget(self.splitter)
         self.pages.addWidget(self.shipping)
+        self.pages.addWidget(self.output_page)
         content = QWidget()
         content.setObjectName("content")
         content_layout = QVBoxLayout(content)
@@ -195,6 +202,13 @@ class MainPage(QMainWindow):
         QApplication.instance().aboutToQuit.connect(self._stop_sharing)
         self._configure_sharing()
         self.refresh()
+        self._apply_history_access()
+        self._update_counts()
+        # Roll the "today" count over at midnight without needing a save.
+        self._day_timer = QTimer(self)
+        self._day_timer.setInterval(60_000)
+        self._day_timer.timeout.connect(self._update_counts)
+        self._day_timer.start()
 
     def _build_header(self) -> QWidget:
         """App name and Catalogue/Shipping switch; status and Settings at right."""
@@ -221,7 +235,12 @@ class MainPage(QMainWindow):
         self.nav = QButtonGroup(self)
         self.nav_catalogue = QPushButton(strings.CATALOGUE_NAV)
         self.nav_shipping = QPushButton(strings.SHIPPING_NAV)
-        for button, icon in ((self.nav_catalogue, "book"), (self.nav_shipping, "box")):
+        self.nav_output = QPushButton(strings.OUTPUT_NAV)
+        for button, icon in (
+            (self.nav_catalogue, "book"),
+            (self.nav_shipping, "box"),
+            (self.nav_output, "chart"),
+        ):
             button.setCheckable(True)
             theme.set_icon(button, icon)
             self.nav.addButton(button)
@@ -229,6 +248,7 @@ class MainPage(QMainWindow):
         self.nav_catalogue.setChecked(True)
         self.nav_catalogue.clicked.connect(lambda: self.show_workspace(shipping=False))
         self.nav_shipping.clicked.connect(lambda: self.show_workspace(shipping=True))
+        self.nav_output.clicked.connect(lambda: self.show_workspace(output=True))
         layout.addWidget(segmented)
         layout.addStretch()
         self.update_button = QPushButton()
@@ -238,6 +258,18 @@ class MainPage(QMainWindow):
         self.update_button.clicked.connect(self.check_for_updates)
         self.update_button.hide()
         layout.addWidget(self.update_button)
+        self.started_chip = QLabel()
+        self.started_chip.setObjectName("chip")
+        self.started_chip.setToolTip(
+            "Lots with meaningful saved information today. Photos alone do not count."
+        )
+        layout.addWidget(self.started_chip)
+        self.info_chip = QLabel()
+        self.info_chip.setObjectName("chip")
+        self.info_chip.setToolTip(
+            "Lots with a title, a condition and identifying details (make, model or serial) today. Photos and research are not needed."
+        )
+        layout.addWidget(self.info_chip)
         self.network_status = QLabel()
         self.network_status.setObjectName("chip")
         layout.addWidget(self.network_status)
@@ -258,20 +290,82 @@ class MainPage(QMainWindow):
         layout.addWidget(settings_button)
         return header
 
-    def show_workspace(self, *, shipping: bool) -> None:
-        """Switch between catalogue and shipping, saving what's open first."""
-        if shipping and self.pages.currentWidget() is self.splitter:
-            if self._leave_lot() and self.shipping.activate():
-                self.pages.setCurrentWidget(self.shipping)
-        elif (
-            not shipping
-            and self.pages.currentWidget() is self.shipping
-            and self.shipping.flush()
-        ):
-            self.pages.setCurrentWidget(self.splitter)
+    def show_workspace(self, *, shipping: bool = False, output: bool = False) -> None:
+        """Switch between catalogue, shipping and output, saving what's open first."""
+        if output and not self.config.history_access:
+            output = False
+        target = (
+            self.output_page if output else self.shipping if shipping else self.splitter
+        )
+        current = self.pages.currentWidget()
+        if target is not current:
+            if current is self.splitter:
+                left = self._leave_lot()
+            elif current is self.shipping:
+                left = self.shipping.flush()
+            else:
+                left = True
+            if left and self._enter_workspace(target):
+                self.pages.setCurrentWidget(target)
         # A refused switch leaves the highlighted tab on the current workspace.
-        on_shipping = self.pages.currentWidget() is self.shipping
-        (self.nav_shipping if on_shipping else self.nav_catalogue).setChecked(True)
+        current = self.pages.currentWidget()
+        buttons = {
+            self.shipping: self.nav_shipping,
+            self.output_page: self.nav_output,
+        }
+        buttons.get(current, self.nav_catalogue).setChecked(True)
+
+    def _enter_workspace(self, target: QWidget) -> bool:
+        if target is self.shipping:
+            return self.shipping.activate()
+        if target is self.output_page:
+            self.refresh_output()
+        return True
+
+    # -- output ---------------------------------------------------------------
+
+    def _apply_history_access(self) -> None:
+        """Show the Output button only while history access is unlocked."""
+        self.nav_output.setVisible(self.config.history_access)
+        if not self.config.history_access and self.pages.currentWidget() is (
+            self.output_page
+        ):
+            self.show_workspace()
+
+    def _own_history(self) -> dict:
+        """This computer's counted history, uploaded before the host's answer
+        is adopted so that nothing counted here before connecting is lost."""
+        return self.output.rows()
+
+    def _update_counts(self) -> None:
+        today = output.today()
+        started = self.output.started_on(today)
+        info = self.output.count_on(today)
+        self.started_chip.setText(f"{started} started")
+        theme.repolish(self.started_chip, state="ok" if started else "")
+        self.info_chip.setText(f"{info} filled in")
+        theme.repolish(self.info_chip, state="ok" if info else "")
+
+    def refresh_output(self) -> None:
+        """Rebuild the Output page from the history and the catalogue as saved."""
+        today = output.today()
+        try:
+            pipeline = kpi.pipeline(self._workflow_catalogue())
+        except OSError, ValueError, network.NetworkError, catalogue.CatalogueReadError:
+            log.exception("Reading the catalogue for the Output page failed")
+            pipeline = None
+        self.output_page.show_report(
+            kpi.report(self.output.completions, today),
+            pipeline,
+            today,
+            kpi.report(self.output.started, today),
+        )
+
+    def _track_progress(self, auction_no: int, lot: Lot) -> None:
+        """Count the lot's stages as they are saved now. Each lot counts once
+        per day and stage; a lot that is cleared again stops counting."""
+        self.output.track(lot, auction_no)
+        self._update_counts()
 
     # -- data ---------------------------------------------------------------
 
@@ -499,6 +593,7 @@ class MainPage(QMainWindow):
             lot if old.lot_number == lot.lot_number else old
             for old in self._catalogue_lots[auction_no]
         ]
+        self._track_progress(auction_no, replace(lot, photos=photos))
         self._review_current()
         self._release_phone_imports()
         self._recycle(removed, images)
@@ -762,6 +857,10 @@ class MainPage(QMainWindow):
                         ),
                     )
                 self._clear()
+                for auction_no in auctions:
+                    self.output.forget(auction_no)
+                for auction_no, numbers in lots.items():
+                    self.output.forget(auction_no, numbers)
                 self.refresh()
             except network.NetworkError as e:
                 QMessageBox.warning(self, "Sharing", str(e))
@@ -781,6 +880,7 @@ class MainPage(QMainWindow):
             except ExcelLockedError:
                 self._locked_warning()
                 continue
+            self.output.forget(auction_no, numbers)
             self._recycle(removed, images)
             if self.auction_no == auction_no and self.lot_no in numbers:
                 self._clear()
@@ -788,6 +888,7 @@ class MainPage(QMainWindow):
         for auction_no in auctions:
             if not self._trash(self._path(auction_no)):
                 continue
+            self.output.forget(auction_no)
             if self._details(auction_no).exists():
                 self._trash(self._details(auction_no))
             images = self._images_dir(auction_no)
@@ -797,6 +898,7 @@ class MainPage(QMainWindow):
                 self._clear()
 
         self.refresh()
+        self._update_counts()
         if self.auction_no is not None and self.lot_no is not None:
             self.sidebar.select(self.auction_no, self.lot_no)
         self._status(strings.DELETED.format(what=what))
@@ -923,6 +1025,10 @@ class MainPage(QMainWindow):
             QMessageBox.warning(self, "Sharing", str(e))
             return
 
+        if not self.shared:
+            for lot in added:
+                self.output.track(lot, auction_no)
+            self._update_counts()
         self.refresh()
         if added:
             self.sidebar.select(auction_no, added[0].lot_number)
@@ -1000,6 +1106,9 @@ class MainPage(QMainWindow):
             self.config.move_old_files()
             # A new main folder has (or gets) its own conditions.yaml.
             moved = self.config.base_dir != old_base
+            if moved:
+                self.output = output.OutputLog(self.config.data_dir / output.FILE_NAME)
+                self._update_counts()
             if moved and not self.shared:
                 self.shipping.reload(self.config.data_dir / "shipping")
             if moved and (error := self.config.load_conditions()):
@@ -1045,17 +1154,24 @@ class MainPage(QMainWindow):
                 self.config.save_conditions()
             chosen_dark = dialog.dark_mode()
             chosen_dyslexic, chosen_size = dialog.dyslexic_font(), dialog.font_size()
+            chosen_access = dialog.history_access()
+            newly_unlocked = chosen_access and not self.config.history_access
             replace(
                 self.config,
                 dark_mode=chosen_dark,
                 dyslexic_font=chosen_dyslexic,
                 font_size=chosen_size,
                 sharing=chosen_sharing,
+                history_access=chosen_access,
             ).save()
             self.config.dark_mode = chosen_dark
             self.config.dyslexic_font = chosen_dyslexic
             self.config.font_size = chosen_size
             self.config.sharing = chosen_sharing
+            self.config.history_access = chosen_access
+            self._apply_history_access()
+            if newly_unlocked:
+                self._status(strings.HISTORY_UNLOCKED)
             self._configure_sharing()
             theme.apply(
                 QApplication.instance(),
@@ -1172,6 +1288,7 @@ class MainPage(QMainWindow):
                     self.client = network.LocalClient(
                         db, self.config.data_dir / "shared-cache"
                     )
+                    self.client.history = self._own_history
                     self.shipping.set_connection(self.client, True)
                     self.shipping.folder = self.config.data_dir / "shipping"
                     self._apply_snapshot(
@@ -1205,6 +1322,7 @@ class MainPage(QMainWindow):
                 settings.code,
                 identity=identity,
                 cache=self.config.data_dir / "shared-cache",
+                history=self._own_history,
             )
             self.shipping.folder = self.config.data_dir / "shipping"
             self.shipping.set_connection(self.client, True)
@@ -1251,10 +1369,14 @@ class MainPage(QMainWindow):
         self.config.sharing = saved
         self._sharing_signature = self._connection_signature()
 
-    def _apply_snapshot(self, snapshot):
+    def _apply_snapshot(self, snapshot, adopt_output=True):
         if self.client is not None and not self.client.identity:
             self.client.identity = snapshot["identity"]
         self._remember_connection()
+        # Adopt only after this computer's history was uploaded (see _own_history).
+        if "output" in snapshot and adopt_output:
+            self.output.adopt(snapshot["output"])
+            self._update_counts()
         changed = (
             not self._shared_snapshot
             or snapshot["revision"] != self._shared_snapshot["revision"]
@@ -1273,6 +1395,8 @@ class MainPage(QMainWindow):
             self._update_navigation()
             if self.auction_no is not None and self.lot_no is not None:
                 self.sidebar.select(self.auction_no, self.lot_no)
+            if self.pages.currentWidget() is self.output_page:
+                self.refresh_output()
         state = (
             "Local"
             if isinstance(self.client, network.LocalClient)
@@ -1335,7 +1459,12 @@ class MainPage(QMainWindow):
                 self.network_status.setToolTip(str(worker.error))
                 return
             snapshot, batch, record, lot = worker.result
-            self._apply_snapshot(snapshot)
+            # The poll uploads history only from a client that carries it.
+            self._apply_snapshot(
+                snapshot,
+                adopt_output=worker.connection is not None
+                and worker.connection.history is not None,
+            )
             if (
                 not self.form.is_dirty()
                 and worker.current_key == (self.auction_no, self.lot_no)

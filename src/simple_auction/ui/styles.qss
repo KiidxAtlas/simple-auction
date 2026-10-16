@@ -875,3 +875,103 @@ QListWidget#editorList::indicator:checked {
     border-color: $accent;
     image: url($check);
 }
+
+/* ---- Output (KPI) page --------------------------------------------- */
+
+QFrame#kpiCard,
+QFrame#kpiHero {
+    background: $surface;
+    border: 1px solid $border;
+    border-bottom-color: $shadow;
+    border-radius: 12px;
+}
+
+QFrame#kpiHero[accent="true"] {
+    background: $accent_soft;
+    border-color: $accent;
+}
+
+QFrame#kpiStat {
+    background: $bg;
+    border: none;
+    border-radius: 8px;
+}
+
+QLabel#kpiLabel {
+    color: $muted;
+    font-size: ${fs_small}px;
+    font-weight: 600;
+}
+
+QLabel#kpiNote {
+    color: $muted;
+    font-size: ${fs_small}px;
+}
+
+QLabel#kpiValue {
+    font-size: ${fs_title}px;
+    font-weight: 700;
+}
+
+QFrame#kpiHero QLabel#kpiValue {
+    font-size: ${fs_display}px;
+}
+
+QFrame#kpiHero[accent="true"] QLabel#kpiValue,
+QFrame#kpiHero[accent="true"] QLabel#kpiLabel {
+    color: $accent;
+}
+
+QFrame#kpiStat QLabel#kpiValue {
+    font-size: ${fs_heading}px;
+}
+
+QLabel#kpiReady {
+    font-size: ${fs_title}px;
+    font-weight: 700;
+}
+
+QProgressBar#kpiProgress {
+    background: $hover;
+    border: none;
+    border-radius: 4px;
+}
+
+QProgressBar#kpiProgress::chunk {
+    background: $accent;
+    border-radius: 4px;
+}
+
+QPushButton#kpiMore {
+    background: transparent;
+    border: none;
+    color: $accent;
+    font-weight: 600;
+    padding: 6px 14px;
+}
+
+QPushButton#kpiMore:hover {
+    background: $hover;
+    border-radius: 6px;
+}
+
+QTableWidget#kpiTable {
+    background: transparent;
+    border: none;
+    outline: 0;
+}
+
+QTableWidget#kpiTable QHeaderView::section {
+    background: transparent;
+    color: $muted;
+    border: none;
+    border-bottom: 1px solid $border;
+    font-size: ${fs_small}px;
+    font-weight: 600;
+    padding: 4px 8px;
+}
+
+QTableWidget#kpiTable::item {
+    border-bottom: 1px solid $border;
+    padding: 4px 8px;
+}

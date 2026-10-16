@@ -27,6 +27,7 @@ class NetworkPoll(QThread):
                     self.client.code,
                     identity=self.client.identity,
                     cache=self.client.cache,
+                    history=self.client.history,
                 )
             )
             self.connection = client
