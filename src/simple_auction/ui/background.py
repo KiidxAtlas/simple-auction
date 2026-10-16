@@ -3,8 +3,10 @@
 import logging
 from collections.abc import Callable
 
-from PySide6.QtCore import QEvent, QEventLoop, QObject, Qt, QThread, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QProgressDialog, QWidget
+
+from simple_auction.services import image
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +24,22 @@ class _Worker(QThread):
         except Exception as e:
             log.exception("Catalogue operation failed")
             self.error = e
+
+
+class PhotoFixThread(QThread):
+    """Brings saved lot photos up to the ProxiBid standard without blocking the UI."""
+
+    fixed = Signal(int)  # how many photos were rewritten
+
+    def __init__(self, photos_dir) -> None:
+        super().__init__()
+        self.photos_dir = photos_dir
+
+    def run(self) -> None:
+        try:
+            self.fixed.emit(image.fix_library(self.photos_dir))
+        except Exception:
+            log.exception("Fixing saved photos failed")
 
 
 class _Progress(QProgressDialog):

@@ -1,4 +1,6 @@
 import io
+import logging
+import re
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -8,9 +10,14 @@ from PIL import Image, ImageOps
 from simple_auction.constants import (
     IMAGE_MAX_QUALITY,
     IMAGE_MIN_QUALITY,
-    IMAGE_SIZE_RATIO,
+    PHOTO_FOLDER_NAME,
+    PHOTO_MAX_BYTES,
+    PHOTO_MAX_HEIGHT,
+    PHOTO_MAX_WIDTH,
 )
 from simple_auction.services import storage
+
+log = logging.getLogger(__name__)
 
 
 def image_name(lot_number: int, index: int) -> str:
@@ -75,14 +82,12 @@ def prepare_photos(
     for i, src in enumerate(photos):
         target = dest / f"{image_name(lot_number, i)}.jpg"
         if src.parent.resolve() == dest.resolve():
-            data = src.read_bytes()
-            # Also catch corrupt processed files before starting a commit.
-            with Image.open(io.BytesIO(data)) as img:
-                img.verify()
+            # Already ours: keep as is when it meets the standard, otherwise
+            # bring it into line (also catches corrupt files before a commit).
+            data = fit_saved(src.read_bytes())
         else:
             with Image.open(src) as img:
-                img = ImageOps.exif_transpose(img).convert("RGB")
-                data = _compress(img, int(src.stat().st_size * IMAGE_SIZE_RATIO))
+                data = conform(img)
         if not target.exists() or target.read_bytes() != data:
             changes[target] = data
         out.append(target)
@@ -90,6 +95,75 @@ def prepare_photos(
         if old not in out:
             changes[old] = None
     return changes, out
+
+
+def _box(img: Image.Image) -> tuple[int, int]:
+    """The largest allowed size for the photo's orientation."""
+    if img.width >= img.height:
+        return PHOTO_MAX_WIDTH, PHOTO_MAX_HEIGHT
+    return PHOTO_MAX_HEIGHT, PHOTO_MAX_WIDTH
+
+
+def conform(img: Image.Image) -> bytes:
+    """JPEG bytes for a new photo: upright, within 1024x768 and 145 KB.
+
+    Never enlarged, and re-encoding drops camera metadata such as location.
+    """
+    img = ImageOps.exif_transpose(img).convert("RGB")
+    box = _box(img)
+    if img.width > box[0] or img.height > box[1]:
+        img = ImageOps.contain(img, box, Image.Resampling.LANCZOS)
+    return _compress(img, PHOTO_MAX_BYTES)
+
+
+def meets_standard(data: bytes) -> bool:
+    """Is this already a JPEG within the size, dimensions and orientation rules?"""
+    if len(data) > PHOTO_MAX_BYTES:
+        return False
+    with Image.open(io.BytesIO(data)) as img:
+        if img.format != "JPEG" or img.getexif().get(0x0112, 1) != 1:
+            return False
+        width, height = _box(img)
+        return img.width <= width and img.height <= height
+
+
+def fit_saved(data: bytes) -> bytes:
+    """A photo already in the library, changed only if it breaks the standard."""
+    if meets_standard(data):
+        with Image.open(io.BytesIO(data)) as img:
+            img.verify()  # also catches truncated files
+        return data
+    with Image.open(io.BytesIO(data)) as img:
+        return conform(img)
+
+
+_LOT_PHOTO = re.compile(r"\d+(-\d+)?\.jpg", re.IGNORECASE)
+
+
+def fix_library(photos_dir: Path) -> int:
+    """Bring every saved lot photo up to the standard; returns how many changed.
+
+    Only files that break it are rewritten (same name, same place). A photo
+    that cannot be read is left alone and logged rather than stopping the rest.
+    """
+    fixed = 0
+    for folder in sorted(photos_dir.glob(PHOTO_FOLDER_NAME.format(auction="*"))):
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.iterdir()):
+            if not _LOT_PHOTO.fullmatch(path.name):
+                continue
+            try:
+                with storage.lock:
+                    data = path.read_bytes()
+                    if meets_standard(data):
+                        continue
+                    with Image.open(io.BytesIO(data)) as img:
+                        storage.atomic_write(path, conform(img))
+                fixed += 1
+            except OSError, ValueError:
+                log.exception("Could not bring %s up to the photo standard", path)
+    return fixed
 
 
 RESEARCH_IMAGE_SIDE = 1280  # px; enough to read markings, small to upload

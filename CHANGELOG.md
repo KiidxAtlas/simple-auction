@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.13 — 2026-10-16
+
+### Changed
+
+- Photos now follow the ProxiBid standard: at most 1024×768 (768×1024 for
+  portrait) and 145 KB, never enlarged, upright, and without camera metadata.
+  Photo naming is unchanged.
+- Photos saved earlier that break the standard are fixed automatically in the
+  background when the app starts and when the photos folder changes; photos that
+  already comply, and any that cannot be read, are left untouched.
+
 ## 0.1.12 — 2026-10-16
 
 ### Changed

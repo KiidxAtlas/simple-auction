@@ -56,7 +56,7 @@ from simple_auction.services.excel import ExcelLockedError
 from simple_auction.services.image import archive_removed, lot_photo_files
 from simple_auction.services.updates import is_frozen
 from simple_auction.ui import strings, theme
-from simple_auction.ui.background import run_io
+from simple_auction.ui.background import PhotoFixThread, run_io
 from simple_auction.ui.components.lot_form import LotForm
 from simple_auction.ui.components.lot_sidebar import LotSidebar, Selection
 from simple_auction.ui.components.research_panel import ResearchPanel
@@ -202,6 +202,8 @@ class MainPage(QMainWindow):
         QApplication.instance().aboutToQuit.connect(self._stop_sharing)
         self._configure_sharing()
         self.refresh()
+        self._photo_fix_thread: PhotoFixThread | None = None
+        QTimer.singleShot(0, self._fix_saved_photos)
         self._apply_history_access()
         self._update_counts()
         # Roll the "today" count over at midnight without needing a save.
@@ -672,6 +674,22 @@ class MainPage(QMainWindow):
         if info is not None and info.is_newer:
             UpdateDialog(self, info).exec()
 
+    def _fix_saved_photos(self) -> None:
+        """Bring photos saved earlier up to the ProxiBid standard, quietly."""
+        if self._photo_fix_thread is not None and self._photo_fix_thread.isRunning():
+            return
+        # Not parented to the window: deleting a running QThread is fatal.
+        thread = PhotoFixThread(self.config.photos_dir)
+        thread.fixed.connect(self._on_photos_fixed)
+        self._photo_fix_thread = thread
+        thread.start()
+
+    def _on_photos_fixed(self, count: int) -> None:
+        if count:
+            self._status(
+                f"Resized {strings.count(count, 'photo')} to ProxiBid standards"
+            )
+
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._io_busy or self.shipping.busy:
             event.ignore()
@@ -686,6 +704,11 @@ class MainPage(QMainWindow):
                 if (signal := getattr(thread, name, None)) is not None:
                     signal.disconnect()
             keep_until_finished(thread)
+        fixer = self._photo_fix_thread
+        if fixer is not None and fixer.isRunning():
+            fixer.fixed.disconnect()
+            keep_until_finished(fixer)
+        self._photo_fix_thread = None
         self._startup_update_thread = None
         if self.flush():
             self.research.reset(None)
@@ -1133,6 +1156,7 @@ class MainPage(QMainWindow):
 
                 self._io("Copying shared photos to the new folder…", copy_shared_assets)
             self.config.photos_dir = new_photos
+            self._fix_saved_photos()
             # Only remember the number if it differs from what the files give.
             from_files = numbering.next_auction(
                 existing

@@ -11,8 +11,11 @@ TITLE_MAX_LENGTH = 100
 AUCTION_STEP = 1000
 FIRST_AUCTION = 40000
 
-# Photos are re-encoded to at most this fraction of their original file size.
-IMAGE_SIZE_RATIO = 0.5
+# ProxiBid photo standard: at most 1024x768 (768x1024 for portrait) and 145 KB.
+# The size limit is decimal (145,000 bytes), the stricter reading of "145k".
+PHOTO_MAX_WIDTH = 1024
+PHOTO_MAX_HEIGHT = 768
+PHOTO_MAX_BYTES = 145_000
 IMAGE_MIN_QUALITY = 20
 IMAGE_MAX_QUALITY = 95
 

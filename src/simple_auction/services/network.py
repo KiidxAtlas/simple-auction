@@ -1009,8 +1009,7 @@ class Client:
             if digest not in expected["photos"]:
                 # Apply the existing photo processing for newly added images.
                 with Image.open(io.BytesIO(raw)) as img:
-                    img = image.ImageOps.exif_transpose(img).convert("RGB")
-                    raw = image._compress(img, int(len(raw) * image.IMAGE_SIZE_RATIO))
+                    raw = image.conform(img)
                 digest = hashlib.sha256(raw).hexdigest()
             record = {"hash": digest}
             if digest not in expected["photos"]:
