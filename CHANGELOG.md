@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.12 — 2026-10-16
+
+### Changed
+
+- The Settings button that hides Output again is now labelled **Remove elevated
+  privileges**; it takes effect on Save.
+
+### Fixed
+
+- Typing the Output access word into the Gemini API key field no longer shows
+  that it was accepted before Save; the elevated-access status and removal
+  button reflect only access that is already saved.
+
 ## 0.1.11 — 2026-10-16
 
 ### Added

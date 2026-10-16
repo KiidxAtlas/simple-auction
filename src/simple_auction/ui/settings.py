@@ -581,7 +581,6 @@ class SettingsDialog(QDialog):
         history_row.addWidget(self.history_state, 1)
         history_row.addWidget(self.lock_history)
         section.layout().addLayout(history_row)
-        self.key.textChanged.connect(self._refresh_history_state)
         self._refresh_key_state()
         self._refresh_history_state()
         return section
@@ -735,7 +734,9 @@ class SettingsDialog(QDialog):
         self._refresh_key_state()
 
     def _refresh_history_state(self) -> None:
-        unlocked = self.history_access()
+        # Reflects only access that is already saved. Typing in the key field
+        # must not confirm the access word before Save.
+        unlocked = self._history_access
         self.history_state.setText(strings.HISTORY_UNLOCKED if unlocked else "")
         self.history_state.setVisible(unlocked)
         self.lock_history.setVisible(unlocked)

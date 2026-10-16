@@ -444,6 +444,6 @@ COMPLETED_TODAY = "{lots} completed today"
 COMPLETED_TODAY_TIP = (
     "Lots that became ready to publish today (every check in the work queue passed)."
 )
-HISTORY_UNLOCKED = "History access is on. Output appears in the header."
-LOCK_HISTORY = "Lock history"
+HISTORY_UNLOCKED = "Elevated access is on. Output appears in the header."
+LOCK_HISTORY = "Remove elevated privileges"
 RELOAD_SHARED = "Reload from host"

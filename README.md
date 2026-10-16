@@ -62,7 +62,8 @@ sections; **Cancel** discards pending changes.
 
 Output is unlocked privately: type the access word into the Gemini API key field
 in **Settings → Research** and save. The word is never stored as an API key, so
-your saved Gemini key is kept. **Lock history** hides Output again.
+your saved Gemini key is kept. Once unlocked, **Remove elevated privileges** appears
+in the same section; save afterwards to hide Output again.
 
 Output distinguishes lots with information started from lots whose information
 is filled out. Photos can be added later; publication readiness is a separate
