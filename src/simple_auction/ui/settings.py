@@ -692,11 +692,11 @@ class SettingsDialog(QDialog):
         """A key typed in, or None to keep the current one."""
         text = self.key.text().strip()
         # The access key unlocks the Output page; it is never an API key.
-        return None if text == output.ACCESS_KEY else (text or None)
+        return None if output.is_access_word(text) else (text or None)
 
     def history_access(self) -> bool:
         """Whether the Output page should be available after saving."""
-        return self._history_access or self.key.text().strip() == output.ACCESS_KEY
+        return self._history_access or output.is_access_word(self.key.text().strip())
 
     def serial_links(self) -> list[SerialLink]:
         """The rows that make a usable link (name + http(s) URL)."""
@@ -743,7 +743,7 @@ class SettingsDialog(QDialog):
 
     def _lock_history(self) -> None:
         self._history_access = False
-        if self.key.text().strip() == output.ACCESS_KEY:
+        if output.is_access_word(self.key.text().strip()):
             self.key.clear()
         self._refresh_history_state()
 

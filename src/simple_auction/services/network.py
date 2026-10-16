@@ -10,6 +10,7 @@ import hmac
 import io
 import ipaddress
 import json
+import logging
 import re
 import secrets
 import socket
@@ -46,6 +47,8 @@ DISCOVERY_PORT = 8766
 MAGIC = b"simple-auction-discover-v1"
 MAX_BODY = 64 * 1024 * 1024
 PHOTO_LIMIT = 40
+
+log = logging.getLogger(__name__)
 
 
 class NetworkError(shipping.ShippingError):
@@ -247,6 +250,7 @@ class Database:
         self.assets = self.config.photos_dir / ".shared" / self.identity
         self._migrate()
         self._backfill_output()
+        self._fix_photos()
 
     @contextmanager
     def connect(self):
@@ -287,6 +291,37 @@ class Database:
                 lot = Lot(**{k: v for k, v in json.loads(raw).items() if k != "photos"})
                 self._set_output(db, int(key.split("/")[0]), lot)
             db.execute("INSERT INTO meta VALUES ('output','1')")
+
+    def _fix_photos(self):
+        """Bring shared photos up to the ProxiBid standard. Photos are stored
+        under the hash of their bytes, so a fixed photo gets a new hash and
+        the lots that use it are pointed at it."""
+        with self.transaction() as db:
+            fixed = {}
+            for key, raw in db.execute(
+                "SELECT key,data FROM records WHERE kind='lot'"
+            ).fetchall():
+                data = json.loads(raw)
+                digests = data.get("photos", [])
+                for digest in digests:
+                    if digest not in fixed:
+                        fixed[digest] = self._fit_asset(digest)
+                updated = [fixed[digest] for digest in digests]
+                if updated != digests:
+                    self.put(db, "lot", key, {**data, "photos": updated})
+
+    def _fit_asset(self, digest):
+        """The hash of this photo once it meets the standard (its own hash if
+        it already does, or cannot be read and is left alone)."""
+        try:
+            path = self.asset(digest)
+            if not path.exists() or image.meets_standard(path):
+                return digest
+            with Image.open(io.BytesIO(path.read_bytes())) as img:
+                return self.store_photo(image.conform(img))
+        except OSError, ValueError:
+            log.exception("Could not bring shared photo %s up to the standard", digest)
+            return digest
 
     def _merge_output(self, db, rows):
         """Add history counted on a computer before it connected. The dates it

@@ -31,6 +31,20 @@ Export and Delete; the sidebar list can also be used with the keyboard (arrows,
 Return to open or close an auction). On narrow windows the editor reflows into one
 column instead of cutting fields off.
 
+Press **Ctrl+D** (or **⋯ → Duplicate this lot**) to start a new lot from this lot's make,
+model, condition and consignment; **Ctrl+G** jumps to the search box, and Enter there
+opens the lot with that number. After deleting lots, **Undo** in the notice brings them
+back (with their photos) for a few seconds. The **Needs attention (N)** chip under the
+search box shows only lots missing a title or condition. **⋯ → Keyboard shortcuts…**
+lists them all.
+
+Photos are kept to ProxiBid standards: at most 1024×768 and 145 KB, saved as JPEG
+under the usual lot-number names. Larger photos are resized when added, and photos
+already saved are fixed automatically at startup (in shared mode, when the shared
+database opens). The Photos area shows each photo's size, rotates (left/right),
+previews at full size (double-click, arrow keys to move), and drag-to-reorder or
+**Make main photo** sets which photo is first.
+
 Auction workbooks and Excel exports use **Lot Number, Title, Description, Owner,
 Book Number, Serial, Condition, Year**, in that order. Older app workbooks still
 load correctly and are reordered when saved or exported; exporting does not

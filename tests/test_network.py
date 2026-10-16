@@ -355,3 +355,36 @@ def test_short_code_limits_incorrect_attempts_and_recovers(host):
             (stamp - 61, peer) for stamp, peer in host._auth_failures
         )
     assert client.snapshot()["identity"] == host.db.identity
+
+
+def test_oversized_shared_photos_are_fixed_when_the_database_opens(config):
+    import os
+
+    from simple_auction.constants import PHOTO_MAX_BYTES
+    from simple_auction.services import image
+
+    db = network.Database(config)
+    buf = io.BytesIO()
+    big = Image.frombytes("RGB", (2400, 1800), os.urandom(2400 * 1800 * 3))
+    big.save(buf, "JPEG", quality=95)
+    old = db.store_photo(buf.getvalue())
+    good = db.store_photo(image.conform(Image.new("RGB", (400, 300), "blue")))
+    with db.transaction() as conn:
+        key = "41000/41000"
+        record = db.get(conn, "lot", key)
+        db.put(conn, "lot", key, {**record, "photos": [old, good]})
+
+    reopened = network.Database(config)
+
+    with reopened.transaction() as conn:
+        first, second = reopened.get(conn, "lot", key)["photos"]
+    assert first != old
+    assert second == good  # already compliant: same photo, same hash
+    fixed = reopened.asset(first)
+    assert fixed.stat().st_size <= PHOTO_MAX_BYTES
+    with Image.open(fixed) as img:
+        assert img.width <= 1024 and img.height <= 768
+    assert reopened.asset(old).is_file()  # the old copy stays for stale clients
+    again = network.Database(config)  # a second pass changes nothing
+    with again.transaction() as conn:
+        assert again.get(conn, "lot", key)["photos"] == [first, second]

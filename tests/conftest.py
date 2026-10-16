@@ -26,3 +26,17 @@ def _isolated_home(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
     return home
+
+
+@pytest.fixture
+def access_word(monkeypatch):
+    """A throwaway Output passphrase, so tests never contain the real one."""
+    from simple_auction.services import output
+
+    salt = b"test-salt-16byte"
+    monkeypatch.setattr(output, "ACCESS_ITERATIONS", 1000)
+    monkeypatch.setattr(output, "ACCESS_SALT", salt)
+    monkeypatch.setattr(
+        output, "ACCESS_HASH", output.access_hash("test-passphrase", salt)
+    )
+    return "test-passphrase"

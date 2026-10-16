@@ -1,4 +1,5 @@
 import math
+import tempfile
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -41,7 +43,7 @@ from PySide6.QtWidgets import (
 
 from simple_auction.constants import TITLE_MAX_LENGTH
 from simple_auction.models import Lot
-from simple_auction.services import dossier
+from simple_auction.services import dossier, image
 from simple_auction.services.conditions import DEFAULT_CONDITIONS, ConditionOption
 from simple_auction.services.listing import (
     condition_desc,
@@ -74,9 +76,10 @@ from simple_auction.services.title_layout import (
 from simple_auction.ui import strings, theme
 from simple_auction.ui.components.scrollable_line_edit import ScrollableLineEdit
 from simple_auction.ui.flow_layout import FlowLayout
+from simple_auction.ui.photo_preview import PhotoPreview
 
 PHOTO_SUFFIXES = (".jpg", ".jpeg", ".png", ".heic", ".webp")
-PHOTO_GRID = QSize(theme.THUMB_SIZE + 16, theme.THUMB_SIZE + 30)
+PHOTO_GRID = QSize(theme.THUMB_SIZE + 16, theme.THUMB_SIZE + 44)
 PHOTO_MAX_ROWS = 3
 
 
@@ -295,6 +298,7 @@ class LotForm(QWidget):
     evidence_requested = Signal()
     phone_requested = Signal()
     duplicates_requested = Signal()
+    duplicate_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -302,6 +306,7 @@ class LotForm(QWidget):
         self._looked_up = ""  # last serial sent for lookup
         self._auction_no: int | None = None
         self._photos: list[Path] = []
+        self._scratch: tempfile.TemporaryDirectory | None = None
         self._dirty = False
         self._loading = False
         self._review_identity: tuple = ()
@@ -367,6 +372,9 @@ class LotForm(QWidget):
         new_lot = QShortcut(QKeySequence(QKeySequence.StandardKey.New), self)
         new_lot.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         new_lot.activated.connect(self._new_lot)
+        duplicate = QShortcut(QKeySequence("Ctrl+D"), self)
+        duplicate.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        duplicate.activated.connect(self._duplicate_lot)
 
     # -- building -----------------------------------------------------------
 
@@ -457,6 +465,8 @@ class LotForm(QWidget):
         more.addSeparator()
         more.addAction("Evidence & publication review…", self.evidence_requested.emit)
         more.addAction("Phone photo intake…", self.phone_requested.emit)
+        more.addAction(strings.DUPLICATE_LOT, self._duplicate_lot)
+        more.addAction(strings.SHORTCUTS_MENU, self._show_shortcuts)
         more.addSeparator()
         delete = more.addAction(strings.DELETE_LOT)
         theme.set_icon(delete, "trash")
@@ -643,6 +653,14 @@ class LotForm(QWidget):
         photo_bar.addWidget(add_photos)
         photo_tools = QPushButton("Photo tools")
         photo_menu = QMenu(photo_tools)
+        photo_menu.addAction(strings.PHOTO_PREVIEW, self._preview_photo)
+        photo_menu.addAction(
+            strings.PHOTO_ROTATE_LEFT, lambda: self._rotate_selected(-90)
+        )
+        photo_menu.addAction(
+            strings.PHOTO_ROTATE_RIGHT, lambda: self._rotate_selected(90)
+        )
+        photo_menu.addSeparator()
         photo_menu.addAction("Phone photo intake…", self.phone_requested.emit)
         photo_tools.setMenu(photo_menu)
         photo_bar.addWidget(photo_tools)
@@ -675,7 +693,15 @@ class LotForm(QWidget):
         self.photo_list.setFlow(QListView.Flow.LeftToRight)
         self.photo_list.setWrapping(True)
         self.photo_list.setResizeMode(QListView.ResizeMode.Adjust)
-        self.photo_list.setMovement(QListView.Movement.Static)
+        self.photo_list.setMovement(QListView.Movement.Snap)
+        self.photo_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.photo_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.photo_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.photo_list.customContextMenuRequested.connect(self._photo_menu)
+        self.photo_list.itemDoubleClicked.connect(
+            lambda item: self._preview_photo(self.photo_list.row(item))
+        )
+        self.photo_list.model().rowsMoved.connect(self._photos_reordered)
         self.photo_list.setGridSize(PHOTO_GRID)
         self.photo_list.setIconSize(QSize(theme.THUMB_SIZE, theme.THUMB_SIZE))
         self.photo_list.setHorizontalScrollBarPolicy(
@@ -1299,6 +1325,38 @@ class LotForm(QWidget):
         if self._lot is not None:
             self.new_lot_requested.emit()
 
+    def _duplicate_lot(self) -> None:
+        if self._lot is not None:
+            self.duplicate_requested.emit()
+
+    def _show_shortcuts(self) -> None:
+        QMessageBox.information(self, strings.SHORTCUTS_TITLE, strings.SHORTCUTS_BODY)
+
+    def copy_details(self, source: Lot) -> None:
+        """Start this lot from another one's make, model, condition and owner.
+        Serial, year, photos and the written text are left for this lot."""
+        if self._lot is None:
+            return
+        for edit, value in (
+            (self.make, source.make),
+            (self.model, source.model),
+            (self.caliber, source.caliber),
+            (self.barrel_length, source.barrel_length),
+            (self.owner, source.owner),
+            (self.book_no, source.book_no),
+        ):
+            edit.setText(value)
+            edit.setCursorPosition(0)
+        self.gun_type.setCurrentText(source.gun_type)
+        index = self.ca_legality.findData(source.ca_legality)
+        if index >= 0:
+            self.ca_legality.setCurrentIndex(index)
+        self.c_and_r.setChecked(source.c_and_r)
+        self._fill_conditions(source.condition)
+        self._apply_condition(restore=True)
+        self._apply_title_fields()
+        self._mark_dirty()
+
     def apply_autofill(self, values: dict[str, str]) -> None:
         """Put reviewed research suggestions into the open lot's fields
         (keys: make, model, year, serial, barrel_length or "custom:<id>")."""
@@ -1379,22 +1437,134 @@ class LotForm(QWidget):
             self._refresh_photos()
             self._photos_changed()
 
+    def _selected_rows(self) -> list[int]:
+        return sorted(self.photo_list.row(i) for i in self.photo_list.selectedItems())
+
     def _remove_selected_photo(self) -> None:
-        rows = sorted(
-            (self.photo_list.row(i) for i in self.photo_list.selectedItems()),
-            reverse=True,
-        )
-        for row in rows:
+        rows = self._selected_rows()
+        for row in reversed(rows):
             del self._photos[row]
         if rows:
             self._refresh_photos()
             self._photos_changed()
 
+    def _move_photo(self, row: int, new_row: int) -> None:
+        """Move one photo; the first one is the lot's main photo (41001)."""
+        new_row = min(max(new_row, 0), len(self._photos) - 1)
+        if row == new_row or not 0 <= row < len(self._photos):
+            return
+        self._photos.insert(new_row, self._photos.pop(row))
+        self._refresh_photos()
+        self.photo_list.setCurrentRow(new_row)
+        self._photos_changed()
+
+    def _photos_reordered(self) -> None:
+        """The list was rearranged by dragging; follow its new order."""
+        order = [
+            Path(self.photo_list.item(i).data(Qt.ItemDataRole.UserRole))
+            for i in range(self.photo_list.count())
+        ]
+        if order != self._photos and len(order) == len(self._photos):
+            self._photos = order
+            self._photos_changed()
+
+    def _scratch_folder(self) -> Path:
+        """A private folder for turned copies, removed with the editor."""
+        if self._scratch is None:
+            self._scratch = tempfile.TemporaryDirectory(prefix="simple-auction-")
+        return Path(self._scratch.name)
+
+    def _rotate_photos(self, rows: list[int], clockwise_degrees: int) -> None:
+        failed = []
+        for row in rows:
+            try:
+                self._photos[row] = image.rotated_copy(
+                    self._photos[row], self._scratch_folder(), clockwise_degrees
+                )
+            except OSError, ValueError:
+                failed.append(self._photos[row].name)
+        if len(failed) < len(rows):
+            self._refresh_photos()
+            self._photos_changed()
+        if failed:
+            QMessageBox.warning(
+                self,
+                strings.PHOTO_ROTATE_FAILED_TITLE,
+                strings.PHOTO_ROTATE_FAILED.format(name=", ".join(failed)),
+            )
+
+    def _rotate_selected(self, clockwise_degrees: int) -> None:
+        """Turn the selected photos, or all of them when none is selected."""
+        rows = self._selected_rows() or list(range(len(self._photos)))
+        self._rotate_photos(rows, clockwise_degrees)
+
+    def _preview_photo(self, row: int | None = None) -> None:
+        if not self._photos:
+            return
+        if row is None:
+            row = (self._selected_rows() or [0])[0]
+        PhotoPreview(self._photos, row, self).exec()
+
+    def _photo_menu(self, pos) -> None:
+        item = self.photo_list.itemAt(pos)
+        if item is None:
+            return
+        if not item.isSelected():
+            self.photo_list.clearSelection()
+            item.setSelected(True)
+        rows = self._selected_rows()
+        row = rows[0]
+        menu = QMenu(self.photo_list)
+        if len(rows) == 1:
+            menu.addAction(strings.PHOTO_PREVIEW, lambda: self._preview_photo(row))
+        menu.addAction(
+            strings.PHOTO_ROTATE_LEFT, lambda: self._rotate_photos(rows, -90)
+        )
+        menu.addAction(
+            strings.PHOTO_ROTATE_RIGHT, lambda: self._rotate_photos(rows, 90)
+        )
+        if len(rows) == 1:
+            menu.addSeparator()
+            main = menu.addAction(
+                strings.PHOTO_MAKE_MAIN, lambda: self._move_photo(row, 0)
+            )
+            main.setEnabled(row > 0)
+            earlier = menu.addAction(
+                strings.PHOTO_MOVE_EARLIER, lambda: self._move_photo(row, row - 1)
+            )
+            earlier.setEnabled(row > 0)
+            later = menu.addAction(
+                strings.PHOTO_MOVE_LATER, lambda: self._move_photo(row, row + 1)
+            )
+            later.setEnabled(row < len(self._photos) - 1)
+        menu.addSeparator()
+        menu.addAction(strings.PHOTO_REMOVE, self._remove_selected_photo)
+        menu.exec(self.photo_list.viewport().mapToGlobal(pos))
+
     def _refresh_photos(self) -> None:
         self.photo_list.clear()
+        warning = QColor(theme.colors().warning)
         for path in self._photos:
             item = QListWidgetItem(QIcon(str(path)), path.stem)
-            item.setToolTip(str(path))
+            item.setData(Qt.ItemDataRole.UserRole, str(path))
+            info = image.photo_info(path)
+            tip = [str(path)]
+            if info is not None:
+                width, height, size = info
+                item.setText(
+                    f"{path.stem}\n"
+                    + strings.PHOTO_SIZE_BADGE.format(
+                        width=width, height=height, size=max(1, round(size / 1000))
+                    )
+                )
+                try:
+                    compliant = image.meets_standard(path)
+                except OSError, ValueError:
+                    compliant = False
+                if not compliant:
+                    item.setForeground(warning)
+                    tip.append(strings.PHOTO_WILL_RESIZE)
+            item.setToolTip("\n".join(tip))
             self.photo_list.addItem(item)
         has_photos = bool(self._photos)
         self.photo_list.setVisible(has_photos)

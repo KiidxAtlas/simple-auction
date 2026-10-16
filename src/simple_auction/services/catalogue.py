@@ -91,6 +91,25 @@ def delete(
         return removed
 
 
+def restore(
+    workbook: Path,
+    details: Path,
+    lots: list[Lot],
+    photos: dict[Path, bytes],
+) -> None:
+    """Put deleted lots (and their photo files) back, as delete() undone."""
+    with storage.lock:
+        storage.recover(storage.journal_path(workbook))
+        workbook_data, added = excel.prepare_add(workbook, lots)
+        if len(added) != len(lots):
+            raise ValueError("A lot with that number has been added since.")
+        details_data = lot_details.prepare(details, added)
+        changes: dict[Path, bytes | None] = dict(photos)
+        changes[workbook] = workbook_data
+        changes[details] = details_data
+        _commit(workbook, changes)
+
+
 class Cache:
     """Reuse unchanged auctions; file metadata invalidates external edits too."""
 

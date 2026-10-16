@@ -186,7 +186,9 @@ def window(app, tmp_path, monkeypatch):
     app.processEvents()
 
 
-def test_output_is_hidden_until_the_key_is_entered_in_settings(window, monkeypatch):
+def test_output_is_hidden_until_the_key_is_entered_in_settings(
+    window, monkeypatch, access_word
+):
     assert window.started_chip.text() == "0 started"
     assert window.nav_output.isHidden()
     window.show_workspace(output=True)  # also refused when asked for directly
@@ -196,7 +198,7 @@ def test_output_is_hidden_until_the_key_is_entered_in_settings(window, monkeypat
     monkeypatch.setattr(main_page.api_key, "save", saved_keys.append)
 
     def enter_key(dialog):
-        dialog.key.setText("root")
+        dialog.key.setText(access_word)
         return True
 
     monkeypatch.setattr(main_page.SettingsDialog, "exec", enter_key)

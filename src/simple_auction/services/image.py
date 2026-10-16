@@ -116,11 +116,19 @@ def conform(img: Image.Image) -> bytes:
     return _compress(img, PHOTO_MAX_BYTES)
 
 
-def meets_standard(data: bytes) -> bool:
-    """Is this already a JPEG within the size, dimensions and orientation rules?"""
-    if len(data) > PHOTO_MAX_BYTES:
+def meets_standard(source: bytes | Path) -> bool:
+    """Is this already a JPEG within the size, dimensions and orientation rules?
+
+    A path is checked from its size and image header only, without reading the
+    whole file.
+    """
+    if isinstance(source, Path):
+        size, opened = source.stat().st_size, source
+    else:
+        size, opened = len(source), io.BytesIO(source)
+    if size > PHOTO_MAX_BYTES:
         return False
-    with Image.open(io.BytesIO(data)) as img:
+    with Image.open(opened) as img:
         if img.format != "JPEG" or img.getexif().get(0x0112, 1) != 1:
             return False
         width, height = _box(img)
@@ -135,6 +143,37 @@ def fit_saved(data: bytes) -> bytes:
         return data
     with Image.open(io.BytesIO(data)) as img:
         return conform(img)
+
+
+def rotated_copy(src: Path, folder: Path, clockwise_degrees: int) -> Path:
+    """A turned, upright copy of a photo in its own new subfolder of `folder`.
+
+    The original is never touched (it may be the user's own file, or a photo
+    in a shared cache). The copy keeps the file's name so the editor still
+    shows it under the same label.
+    """
+    with Image.open(src) as img:
+        turned = ImageOps.exif_transpose(img).convert("RGB")
+    turned = turned.rotate(-clockwise_degrees, expand=True)
+    target = Path(tempfile.mkdtemp(dir=folder)) / f"{src.stem}.jpg"
+    target.write_bytes(_encode(turned, IMAGE_MAX_QUALITY))
+    return target
+
+
+def photo_info(path: Path) -> tuple[int, int, int] | None:
+    """(width, height, bytes) as the photo will look upright, or None if unreadable.
+
+    Reads the image header only.
+    """
+    try:
+        size = path.stat().st_size
+        with Image.open(path) as img:
+            width, height = img.size
+            if img.getexif().get(0x0112, 1) in (5, 6, 7, 8):
+                width, height = height, width
+    except OSError, ValueError:
+        return None
+    return width, height, size
 
 
 _LOT_PHOTO = re.compile(r"\d+(-\d+)?\.jpg", re.IGNORECASE)
@@ -155,10 +194,9 @@ def fix_library(photos_dir: Path) -> int:
                 continue
             try:
                 with storage.lock:
-                    data = path.read_bytes()
-                    if meets_standard(data):
+                    if meets_standard(path):
                         continue
-                    with Image.open(io.BytesIO(data)) as img:
+                    with Image.open(io.BytesIO(path.read_bytes())) as img:
                         storage.atomic_write(path, conform(img))
                 fixed += 1
             except OSError, ValueError:
@@ -202,7 +240,8 @@ def research_image(path: Path) -> tuple[bytes, str] | None:
 
 def _encode(img: Image.Image, quality: int) -> bytes:
     buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=quality)
+    # optimize: smaller file at the same quality, so more of the 145 KB goes to detail.
+    img.save(buf, "JPEG", quality=quality, optimize=True)
     return buf.getvalue()
 
 

@@ -15,6 +15,8 @@ database is authoritative: `OutputLog.adopt` replaces the local copy with the
 host's rows, so a deleted lot cannot come back from an old local copy.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import uuid
@@ -31,7 +33,25 @@ log = logging.getLogger(__name__)
 FILE_NAME = "output.json"
 VERSION = 2
 # Typed into Settings → Research → key to unlock the history (Output) page.
-ACCESS_KEY = "root"
+# Only a salted, slow hash is kept here, so reading the source does not reveal
+# the passphrase. To change it: pick a new passphrase and a random 16-byte
+# salt, then store `access_hash(passphrase, salt).hex()` and `salt.hex()`.
+ACCESS_ITERATIONS = 600_000
+ACCESS_SALT = bytes.fromhex("ea963e61681a7bcf8a0b32723154efef")
+ACCESS_HASH = bytes.fromhex(
+    "0eb8be07ff414e415f536dee6013f7fa53d824c4afd49fa50e029232bc1ae18d"
+)
+
+
+def access_hash(word: str, salt: bytes = ACCESS_SALT) -> bytes:
+    return hashlib.pbkdf2_hmac("sha256", word.encode(), salt, ACCESS_ITERATIONS)
+
+
+def is_access_word(text: str) -> bool:
+    """Is this the passphrase that unlocks the history (Output) page?"""
+    return bool(text) and hmac.compare_digest(
+        access_hash(text, ACCESS_SALT), ACCESS_HASH
+    )
 
 
 def local_now() -> datetime:

@@ -15,7 +15,7 @@ from PySide6.QtCore import (
     QThread,
     QTimer,
 )
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -66,7 +66,7 @@ from simple_auction.ui.output_page import OutputPage
 from simple_auction.ui.settings import SettingsDialog
 from simple_auction.ui.shipping_page import ShippingPage
 from simple_auction.ui.source_update_dialog import SourceCheckThread, SourceUpdateDialog
-from simple_auction.ui.toast import Toast
+from simple_auction.ui.toast import UNDO_MS, Toast
 from simple_auction.ui.update_dialog import (
     UpdateCheckThread,
     UpdateDialog,
@@ -170,6 +170,9 @@ class MainPage(QMainWindow):
         self.form.evidence_requested.connect(self.open_evidence)
         self.form.phone_requested.connect(self.phone_intake)
         self.form.duplicates_requested.connect(self.review_duplicates)
+        self.form.duplicate_requested.connect(self.duplicate_current)
+        go_to = QShortcut(QKeySequence("Ctrl+G"), self)
+        go_to.activated.connect(self.sidebar.focus_search)
         self.form.changed.connect(self._review_current)
 
         # The installed (Windows) app updates from release installers; a copy
@@ -687,7 +690,7 @@ class MainPage(QMainWindow):
     def _on_photos_fixed(self, count: int) -> None:
         if count:
             self._status(
-                f"Resized {strings.count(count, 'photo')} to ProxiBid standards"
+                strings.PHOTOS_FIXED.format(photos=strings.count(count, "photo"))
             )
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -889,6 +892,7 @@ class MainPage(QMainWindow):
                 QMessageBox.warning(self, "Sharing", str(e))
             return
 
+        backups: list[tuple[int, list[Lot], dict[Path, bytes]]] = []
         for auction_no, numbers in lots.items():
             try:
                 path, details, images = (
@@ -896,6 +900,7 @@ class MainPage(QMainWindow):
                     self._details(auction_no),
                     self._images_dir(auction_no),
                 )
+                saved = self._lots_to_restore(auction_no, numbers)
                 removed = self._io(
                     strings.IO_DELETING,
                     partial(catalogue.delete, path, details, images, numbers),
@@ -904,6 +909,8 @@ class MainPage(QMainWindow):
                 self._locked_warning()
                 continue
             self.output.forget(auction_no, numbers)
+            if saved:
+                backups.append((auction_no, saved, removed))
             self._recycle(removed, images)
             if self.auction_no == auction_no and self.lot_no in numbers:
                 self._clear()
@@ -924,7 +931,14 @@ class MainPage(QMainWindow):
         self._update_counts()
         if self.auction_no is not None and self.lot_no is not None:
             self.sidebar.select(self.auction_no, self.lot_no)
-        self._status(strings.DELETED.format(what=what))
+        if backups and not auctions:
+            self.toast.show_message(
+                strings.DELETED.format(what=what),
+                UNDO_MS,
+                (strings.UNDO, partial(self._undo_delete, backups)),
+            )
+        else:
+            self._status(strings.DELETED.format(what=what))
 
     # -- export / settings --------------------------------------------------
 
@@ -935,6 +949,58 @@ class MainPage(QMainWindow):
     def delete_current(self) -> None:
         if self.auction_no is not None and self.lot_no is not None:
             self.delete_items([(self.auction_no, self.lot_no)])
+
+    def duplicate_current(self) -> None:
+        """Add a lot after the last one, starting from this lot's details."""
+        if self.auction_no is None or self.lot_no is None:
+            return
+        auction_no, source = self.auction_no, self.form.collect()
+        self.create_lot(auction_no)
+        if (self.auction_no, self.lot_no) != (auction_no, source.lot_number):
+            self.form.copy_details(source)
+
+    def _lots_to_restore(self, auction_no: int, numbers: set[int]) -> list[Lot]:
+        """The lots about to be deleted, kept so that Undo can bring them back."""
+        try:
+            lots = self._lots(auction_no)
+        except catalogue.CatalogueReadError, OSError:
+            return []
+        kept = [lot for lot in lots if lot.lot_number in numbers]
+        for lot in kept:
+            lot.photos = []
+        return kept
+
+    def _undo_delete(
+        self, backups: list[tuple[int, list[Lot], dict[Path, bytes]]]
+    ) -> None:
+        if not self._leave_lot():
+            return
+        for auction_no, lots, photos in backups:
+            restore = partial(
+                catalogue.restore,
+                self._path(auction_no),
+                self._details(auction_no),
+                lots,
+                photos,
+            )
+            try:
+                self._io(strings.IO_SAVING, restore)
+            except ExcelLockedError:
+                self._locked_warning()
+                return
+            except (OSError, ValueError) as e:
+                log.exception("Restoring deleted lots failed")
+                QMessageBox.warning(self, strings.UNDO, str(e))
+                return
+            for lot in lots:
+                self.output.track(lot, auction_no)
+        self.refresh()
+        self._update_counts()
+        auction_no, lots, _ = backups[0]
+        self.open_lot(auction_no, lots[0].lot_number)
+        self.sidebar.select(auction_no, lots[0].lot_number)
+        count = sum(len(lots) for _, lots, _ in backups)
+        self._status(strings.UNDO_RESTORED.format(what=strings.count(count, "lot")))
 
     def export_auction(self, auction_no: int) -> None:
         if not self._leave_lot():
@@ -1306,7 +1372,7 @@ class MainPage(QMainWindow):
             if (self.config.data_dir / "shared.sqlite3").exists():
                 try:
                     db = self._io(
-                        "Opening local catalogue database…",
+                        strings.IO_OPENING_SHARED,
                         lambda: network.Database(self.config),
                     )
                     self.client = network.LocalClient(

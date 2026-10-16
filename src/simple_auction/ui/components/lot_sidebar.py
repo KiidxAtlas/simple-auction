@@ -89,6 +89,14 @@ class LotSidebar(QFrame):
         self.search.setAccessibleName(strings.SIDEBAR_SEARCH)
         theme.set_icon(self.search, "search")
         self.search.textChanged.connect(self._filter)
+        self.search.returnPressed.connect(self._open_first_match)
+
+        self.attention = QPushButton()
+        self.attention.setObjectName("filterChip")
+        self.attention.setCheckable(True)
+        self.attention.setToolTip(strings.SIDEBAR_ATTENTION_TIP)
+        self.attention.setText(strings.SIDEBAR_ATTENTION.format(n=0))
+        self.attention.toggled.connect(self._filter)
 
         section = QLabel(strings.AUCTIONS_SECTION)
         section.setObjectName("sectionLabel")
@@ -129,6 +137,8 @@ class LotSidebar(QFrame):
         layout.addLayout(actions)
         layout.addSpacing(10)
         layout.addWidget(self.search)
+        layout.addSpacing(8)
+        layout.addWidget(self.attention)
         layout.addSpacing(16)
         layout.addWidget(section)
         layout.addSpacing(6)
@@ -161,6 +171,7 @@ class LotSidebar(QFrame):
             keep = auction_no in expanded or (first_load and auction_no == numbers[-1])
             parent.setExpanded(keep)
         self._quiet = False
+        self._update_attention_count()
         self._filter()
 
     def select(self, auction_no: int, lot_number: int) -> None:
@@ -180,6 +191,7 @@ class LotSidebar(QFrame):
         if child is not None:
             child.setData(0, TITLE_ROLE, lot.title)
             child.setData(0, MISSING_ROLE, missing_fields(lot))
+            self._update_attention_count()
 
     def neighbor(self, auction_no: int, lot_number: int, step: int) -> int | None:
         """The lot `step` places away within the same auction, if any."""
@@ -191,6 +203,41 @@ class LotSidebar(QFrame):
         if 0 <= index < parent.childCount():
             return parent.child(index).data(0, LOT_ROLE)
         return None
+
+    def _update_attention_count(self) -> None:
+        count = sum(
+            1
+            for parent in self._auction_items()
+            for j in range(parent.childCount())
+            if parent.child(j).data(0, MISSING_ROLE)
+        )
+        self.attention.setText(strings.SIDEBAR_ATTENTION.format(n=count))
+
+    def focus_search(self) -> None:
+        self.search.setFocus()
+        self.search.selectAll()
+
+    def _open_first_match(self) -> None:
+        """Enter in the search box opens the lot with that number, or else the
+        first lot still listed."""
+        query = self.search.text().strip()
+        if not query:
+            return
+        visible = [
+            parent.child(j)
+            for parent in self._auction_items()
+            if not parent.isHidden()
+            for j in range(parent.childCount())
+            if not parent.child(j).isHidden()
+        ]
+        if not visible:
+            return
+        target = next(
+            (c for c in visible if str(c.data(0, LOT_ROLE)) == query), visible[0]
+        )
+        auction_no, lot_number = target.data(0, AUCTION_ROLE), target.data(0, LOT_ROLE)
+        self.select(auction_no, lot_number)
+        self.lot_selected.emit(auction_no, lot_number)
 
     # -- internals ----------------------------------------------------------
 
@@ -210,6 +257,7 @@ class LotSidebar(QFrame):
     def _filter(self, *_args) -> None:
         """Hide lots and auctions that don't match the search box."""
         query = self.search.text().strip().casefold()
+        attention = self.attention.isChecked()
         any_visible = False
         for parent in self._auction_items():
             auction_match = (
@@ -218,14 +266,19 @@ class LotSidebar(QFrame):
                 in strings.AUCTION_ROW.format(n=parent.data(0, AUCTION_ROLE)).casefold()
             )
             lot_match = False
+            shown = 0
             for j in range(parent.childCount()):
                 child = parent.child(j)
                 text = f"{child.data(0, LOT_ROLE)} {child.data(0, TITLE_ROLE) or ''}"
                 matches = not query or query in text.casefold()
-                child.setHidden(not (matches or auction_match))
+                visible = matches or auction_match
+                if attention and not child.data(0, MISSING_ROLE):
+                    visible = False
+                child.setHidden(not visible)
+                shown += visible
                 lot_match |= matches and bool(query)
-            parent.setHidden(not (auction_match or lot_match))
-            if lot_match:
+            parent.setHidden(not (shown if attention else (auction_match or lot_match)))
+            if lot_match and shown:
                 parent.setExpanded(True)
             any_visible |= not parent.isHidden()
         has_auctions = self.tree.topLevelItemCount() > 0

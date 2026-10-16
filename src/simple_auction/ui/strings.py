@@ -17,6 +17,8 @@ DELETE_N = "Delete {n} items"
 SIDEBAR_SEARCH = "Search lots"
 SIDEBAR_NO_MATCH = "No lots match your search."
 SIDEBAR_EMPTY = "No auctions yet. Create one to start cataloguing."
+SIDEBAR_ATTENTION = "Needs attention ({n})"
+SIDEBAR_ATTENTION_TIP = "Show only lots that still need a title or condition"
 INCOMPLETE_TIP = "Still needs: {fields}"
 
 # Lot editor
@@ -104,6 +106,26 @@ PICK_PHOTOS = "Choose photos"
 NO_PHOTOS = "Drop photos here, or use Add photos."
 PHOTOS_DROP_HINT = "JPEG, PNG, HEIC or WebP"
 PHOTOS_HINT = "Drop more photos here. Select one and press Delete to remove it."
+PHOTO_SIZE_BADGE = "{width}×{height} · {size} KB"
+PHOTO_WILL_RESIZE = (
+    "Will be resized to ProxiBid standards (1024×768, 145 KB) when saved."
+)
+PHOTO_PREVIEW = "View larger"
+PHOTO_ROTATE_LEFT = "Rotate left"
+PHOTO_ROTATE_RIGHT = "Rotate right"
+PHOTO_MAKE_MAIN = "Make main photo"
+PHOTO_MOVE_EARLIER = "Move earlier"
+PHOTO_MOVE_LATER = "Move later"
+PHOTO_REMOVE = "Remove"
+PHOTO_ROTATE_FAILED_TITLE = "Rotate photos"
+PHOTO_ROTATE_FAILED = "Could not rotate {name}."
+PHOTO_PREVIEW_TITLE = "Photo"
+PHOTO_CAPTION = "{n} of {total} · {name} · {width}×{height} · {size}"
+PHOTO_UNREADABLE = "{name} could not be shown."
+PREVIOUS = "Previous"
+NEXT = "Next"
+CLOSE = "Close"
+PHOTOS_FIXED = "Resized {photos} to ProxiBid standards"
 
 # Research panel
 RESEARCH = "Research"
@@ -317,6 +339,19 @@ EDIT_SERIAL_TABLE_TIP = "Open the serial number table (CSV) in your spreadsheet 
 # Messages
 SAVED = "Saved lot {n}"
 DELETED = "Deleted {what}"
+UNDO = "Undo"
+UNDO_RESTORED = "Restored {what}"
+DUPLICATE_LOT = "Duplicate this lot"
+SHORTCUTS_MENU = "Keyboard shortcuts…"
+SHORTCUTS_TITLE = "Keyboard shortcuts"
+SHORTCUTS_BODY = (
+    "Ctrl+S\tSave now\n"
+    "Ctrl+N\tNew lot in this auction\n"
+    "Ctrl+D\tDuplicate this lot\n"
+    "Ctrl+PgUp / Ctrl+PgDown\tPrevious / next lot\n"
+    "Ctrl+G\tGo to a lot (type its number, press Enter)\n"
+    "Delete\tDelete the selected lots in the list"
+)
 EXPORTED = "Exported to {path}"
 CONFIRM_DELETE = "Delete {what}?\n\nFiles will be moved to the Trash."
 EXPORT_FAILED = "Export failed, see the log."
@@ -421,6 +456,10 @@ IO_SAVING = "Saving lot…"
 IO_LOADING = "Loading catalogue…"
 IO_IMPORTING = "Importing lots…"
 IO_DELETING = "Deleting lots…"
+IO_OPENING_SHARED = (
+    "Opening the shared catalogue and checking photo sizes…\n"
+    "The first start after an update can take a while."
+)
 CATALOGUE_READ_FAILED = (
     "Couldn't load auction {n}:\n\n{error}\n\nThe files were not overwritten."
 )

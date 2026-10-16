@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.14 — 2026-10-16
+
+### Added
+
+- Photos: rotate left/right, full-size preview (double-click, arrow keys),
+  drag-to-reorder or "Make main photo", and a size badge on each thumbnail.
+- Duplicate this lot (Ctrl+D), Undo after deleting lots, Ctrl+G to jump to the
+  search box (Enter opens the lot with that number), and a "Keyboard
+  shortcuts…" list in the ⋯ menu.
+- A "Needs attention (N)" chip in the sidebar that shows only incomplete lots.
+- The shared-database opening message says that photo sizes are being checked.
+- README describes the photo standard (1024×768, 145 KB).
+
+### Changed
+
+- Unlocking Output now needs a private passphrase. The app only contains a
+  salted hash of it, so the plain word can no longer be read from the source.
+- Photos shared from a host that break the ProxiBid standard are fixed when
+  the shared database opens, and the lots that use them are updated.
+- The startup photo check reads only each file's size and header instead of the
+  whole file, so it is much lighter on large or network photo folders.
+
 ## 0.1.13 — 2026-10-16
 
 ### Changed
