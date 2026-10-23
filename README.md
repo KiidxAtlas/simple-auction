@@ -33,6 +33,13 @@ Export and Delete; the sidebar list can also be used with the keyboard (arrows,
 Return to open or close an auction). On narrow windows the editor reflows into one
 column instead of cutting fields off.
 
+Saved imported photos use their lot number and photo order: `41001.jpg`,
+`41001-1.jpg`, `41001-2.jpg`, and so on. Shared photos use these same filenames
+when loaded after syncing, including photos cached by earlier versions. Reordering
+or removing photos updates the numbering on save. Shared cache copies are kept
+in separate photo-set folders so a sync cannot replace an open draft's photos;
+internal transfer files still use content hashes. Original import files are not renamed.
+
 Press **Ctrl+D** (or **⋯ → Duplicate this lot**) to start a new lot from this lot's make,
 model, condition and consignment; **Ctrl+G** jumps to the search box, and Enter there
 opens the lot with that number. After deleting lots, **Undo** in the notice brings them

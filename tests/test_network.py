@@ -132,6 +132,40 @@ def test_same_lot_conflict_retains_winner_and_independent_lots_save(clients):
     assert a.save_lot(41000, one, original)["title"] == "Alice"
 
 
+def test_synced_photo_names_follow_lot_order_without_changing_open_drafts(
+    clients, tmp_path
+):
+    a, b = clients
+    sources = []
+    for color in ("red", "blue"):
+        source = tmp_path / f"camera-{color}.png"
+        Image.new("RGB", (160, 120), color).save(source)
+        sources.append(source)
+    original = record(a)
+    lot = a.materialize(original)
+    lot.photos = sources
+    saved = a.save_lot(41000, lot, original)
+    draft = b.materialize(saved)
+    assert [p.name for p in draft.photos] == ["41000.jpg", "41000-1.jpg"]
+    before = [p.read_bytes() for p in draft.photos]
+
+    reordered = a.materialize(saved)
+    reordered.photos.reverse()
+    updated = a.save_lot(41000, reordered, saved)
+    latest = b.materialize(updated)
+    assert [p.name for p in latest.photos] == ["41000.jpg", "41000-1.jpg"]
+    assert [p.read_bytes() for p in latest.photos] == before[::-1]
+    assert [p.read_bytes() for p in draft.photos] == before
+
+    latest.photos = latest.photos[1:]
+    reduced = a.save_lot(41000, latest, updated)
+    reopened = network.Client(
+        b.address, b.code, identity=b.identity, cache=b.cache
+    ).materialize(reduced)
+    assert [p.name for p in reopened.photos] == ["41000.jpg"]
+    assert reopened.photos[0].read_bytes() == before[0]
+
+
 def test_photos_transfer_and_removal_are_version_checked(clients, tmp_path, host):
     a, b = clients
     src = tmp_path / "new.png"

@@ -1098,8 +1098,12 @@ class Client:
     def materialize(self, data):
         lot = validated_lot({k: v for k, v in data.items() if k != "photos"})
         folder = self.cache / self.identity / "photos"
+        # Keep each ordered photo set separate: a newer sync must not overwrite
+        # paths still referenced by an open form or an unsaved draft.
+        revision = hashlib.sha256(json.dumps(data["photos"]).encode()).hexdigest()
+        named_folder = folder / "lots" / str(lot.lot_number) / revision
         paths = []
-        for digest in data["photos"]:
+        for index, digest in enumerate(data["photos"]):
             if not re.fullmatch(r"[a-f0-9]{64}", digest):
                 raise NetworkError("Invalid shared photo identity")
             path = folder / (digest + ".jpg")
@@ -1113,7 +1117,13 @@ class Client:
                 if hashlib.sha256(raw).hexdigest() != digest:
                     raise NetworkError("Downloaded photo is incomplete")
                 storage.atomic_write(path, raw)
-            paths.append(path)
+            named = named_folder / f"{image.image_name(lot.lot_number, index)}.jpg"
+            if (
+                not named.exists()
+                or hashlib.sha256(named.read_bytes()).hexdigest() != digest
+            ):
+                storage.atomic_write(named, path.read_bytes())
+            paths.append(named)
         lot.photos = paths
         return lot
 

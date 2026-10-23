@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.16 — 2026-10-23
+
+### Fixed
+
+- Synced photos now use lot-based filenames, matching local imports:
+  `41001.jpg`, `41001-1.jpg`, and so on, in saved photo order.
+- Previously cached shared photos receive properly named copies when loaded.
+  Reordering or removing photos updates the numbering without replacing photo
+  copies still referenced by an open form or unsaved draft.
+- Original import files and internal hash-based transfer files remain untouched.
+
 ## 0.1.15 — 2026-10-23
 
 ### Added
