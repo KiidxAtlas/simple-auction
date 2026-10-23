@@ -23,7 +23,7 @@ class Lot:
     caliber: str = ""
     gun_type: str = ""  # Rifle, Shotgun, Handgun (or anything typed)
     ca_legality: str = "N/A"
-    # Curio & Relic eligible (written into the title as "C&R ELIGIBLE").
+    # Curio & Relic eligible (written into the title as "C&R").
     c_and_r: bool = False
     # Layout used to generate this saved title; None means the legacy layout.
     title_fields: list[str] | None = None

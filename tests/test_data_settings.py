@@ -87,7 +87,7 @@ def test_c_and_r_is_added_to_and_removed_from_the_title():
     assert title == "Mosin 91/30 Good Condition"
     eligible = replace(lot, c_and_r=True)
     title = update_title(title, lot, fields, eligible, fields)
-    assert title == "Mosin 91/30 Good Condition C&R ELIGIBLE"
+    assert title == "Mosin 91/30 Good Condition C&R"
     assert update_title(title, eligible, fields, lot, fields) == (
         "Mosin 91/30 Good Condition"
     )
@@ -297,7 +297,7 @@ def test_lot_editor_defaults_optional_fields_and_reorder(app):
     form.set_title_fields(["title", "make", "barrel_length", "ca_legality", "c_and_r"])
     form.c_and_r.click()
     assert form.title.text() == (
-        "Government Colt Barrel length: 5 inches NOT LEGAL FOR CA C&R ELIGIBLE"
+        "Government Colt Barrel length: 5 inches NOT LEGAL FOR CA C&R"
     )
     assert form.collect().c_and_r is True
     form.c_and_r.click()

@@ -38,6 +38,7 @@ from simple_auction.services import (
     lot_details,
     numbering,
     output,
+    recovery,
     shipping,
     storage,
 )
@@ -240,6 +241,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS exports (id TEXT PRIMARY KEY, batch TEXT NOT NULL, csv BLOB NOT NULL);
             """)
+            recovery.initialize(db)
             db.execute(
                 "INSERT OR IGNORE INTO meta VALUES ('identity', ?)", (uuid4().hex,)
             )
@@ -485,6 +487,27 @@ class Database:
             "output": outputs,
         }
 
+    def _archive_recovery(self, db, kind, auction, records):
+        photos = {
+            self.asset(digest): self.asset(digest).read_bytes()
+            for record in records
+            for digest in record["photos"]
+        }
+        # Export names use lot-number ordering, never host filesystem paths.
+        named = {
+            Path(f"{image.image_name(record['lot_number'], i)}.jpg"): photos[
+                self.asset(digest)
+            ]
+            for record in records
+            for i, digest in enumerate(record["photos"])
+        }
+        return recovery.archive(
+            db,
+            kind,
+            auction,
+            {"records": records, "photos": recovery.photo_data(named)},
+        )
+
     def dispatch(self, op, args):
         with self.transaction() as db:
             if op == "snapshot":
@@ -492,6 +515,51 @@ class Database:
                 if args.get("output"):
                     self._merge_output(db, args["output"])
                 return self.snapshot(db)
+            if op == "recovery_list":
+                return recovery.entries(db)
+            if op == "recovery_get":
+                kind, auction, payload = recovery.get(db, args["id"])
+                return {"kind": kind, "auction": auction, **payload}
+            if op == "recovery_restore":
+                kind, auction, payload = recovery.get(db, args["id"])
+                number(auction)
+                if kind not in {"lots", "auction"}:
+                    raise ValueError(
+                        "Export previous revisions instead of replacing current work."
+                    )
+                existing = self.get(db, "auction", auction)
+                if kind == "auction" and existing is not None:
+                    raise Conflict(
+                        "Auction number is already in use; nothing was overwritten."
+                    )
+                if kind == "lots" and existing is None:
+                    raise Conflict("Restore the deleted auction first.")
+                records = payload["records"]
+                for record in records:
+                    lot = validated_lot(
+                        {k: v for k, v in record.items() if k != "photos"}
+                    )
+                    if self.get(db, "lot", f"{auction}/{lot.lot_number}") is not None:
+                        raise Conflict(
+                            "Lot number is already in use; nothing was overwritten."
+                        )
+                    for digest in record["photos"]:
+                        if not self.asset(digest).is_file():
+                            raise ValueError(
+                                "An archived photo is missing from the host"
+                            )
+                if kind == "auction":
+                    self.put(db, "auction", auction, {"number": auction})
+                for record in records:
+                    self.put(db, "lot", f"{auction}/{record['lot_number']}", record)
+                    self._set_output(
+                        db,
+                        auction,
+                        validated_lot(
+                            {k: v for k, v in record.items() if k != "photos"}
+                        ),
+                    )
+                return auction
             if op == "photo":
                 return base64.b64encode(self.asset(args["hash"]).read_bytes()).decode()
             if op == "new_auction":
@@ -547,6 +615,7 @@ class Database:
                         "Someone else changed this lot. Your edits have been kept; reload the lot before saving again."
                     )
                 if old != updated:
+                    self._archive_recovery(db, "revision", auction, [old])
                     self.put(db, "lot", key, updated)
                 self._set_output(db, auction, lot)
                 return updated
@@ -570,6 +639,18 @@ class Database:
                         "The auction changed while deleting. Refresh and try again."
                     )
                 numbers = args["numbers"]
+                selected = (
+                    current
+                    if numbers is None
+                    else [
+                        v
+                        for v in current
+                        if v["lot_number"] in {number(n) for n in numbers}
+                    ]
+                )
+                self._archive_recovery(
+                    db, "auction" if numbers is None else "lots", auction, selected
+                )
                 if numbers is None:
                     db.execute(
                         "DELETE FROM records WHERE kind='auction' AND key=?",

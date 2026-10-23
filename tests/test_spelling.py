@@ -1,6 +1,8 @@
 """The spellchecker is local and usable without a QApplication or network."""
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -88,6 +90,32 @@ def test_multiple_instances_merge_personal_words(tmp_path):
     restored = Spelling(path)
     assert restored.correct("flibberty")
     assert restored.correct("zorblax")
+
+
+def test_background_scan_and_editor_checks_share_one_checker_safely(engine):
+    start = Barrier(3)
+
+    def scan():
+        start.wait(timeout=5)
+        for _ in range(100):
+            engine.correct("flibberty")
+            engine.correct("rifle")
+            engine.suggest("mispelled")
+
+    def dictionary_changes():
+        start.wait(timeout=5)
+        engine.add("flibberty")
+        for _ in range(100):
+            engine.ignore("zorblax")
+            engine.correct("zorblax")
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        jobs = [pool.submit(scan), pool.submit(scan), pool.submit(dictionary_changes)]
+        for job in jobs:
+            job.result(timeout=10)
+    assert engine.correct("flibberty")
+    assert engine.correct("zorblax")
+    assert Spelling(engine.path).correct("flibberty")
 
 
 @pytest.mark.parametrize("raw", [b"{broken", b"[]", b"{}", b'{"words": [42]}', b"\xff"])

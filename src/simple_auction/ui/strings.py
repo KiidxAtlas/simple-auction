@@ -62,8 +62,8 @@ BOOK_NO = "Book #"
 BARREL_LENGTH = "Barrel length"
 CA_LEGALITY = "CA legality"
 C_AND_R = "C&&R"  # "&&" shows a literal "&" in a Qt label
-C_AND_R_CHECK = "C&&R eligible"
-C_AND_R_TIP = 'Curio & Relic eligible. Adds "C&R ELIGIBLE" to the title.'
+C_AND_R_CHECK = "C&&R"
+C_AND_R_TIP = 'Curio & Relic eligible. Adds "C&R" to the title.'
 
 SERIAL_PLACEHOLDER = "Serial number"
 MAKE = "Make"

@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from simple_auction.models import Lot
-from simple_auction.services import excel, image, lot_details, storage
+from simple_auction.services import excel, image, lot_details, recovery, storage
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +55,19 @@ def save(
         removed = {p: p.read_bytes() for p, data in changes.items() if data is None}
         changes[workbook] = workbook_data
         changes[details] = details_data
+        previous = load(workbook, details)
+        old = next((v for v in previous if v.lot_number == lot.lot_number), None)
+        if old is not None:
+            old_photos = {
+                p: p.read_bytes()
+                for p in image.lot_photo_files(lot.lot_number, photos_dir)
+            }
+            if any(
+                getattr(old, k) != getattr(lot, k) for k in vars(old) if k != "photos"
+            ) or any(p not in {workbook, details} for p in changes):
+                recovery.archive_local(
+                    details, "revision", [old], old_photos, workbook=workbook
+                )
         _commit(workbook, changes)
         return photos, removed
 
@@ -84,6 +97,8 @@ def delete(
             for number in numbers
             for p in image.lot_photo_files(number, photos_dir)
         }
+        saved = [v for v in load(workbook, details) if v.lot_number in numbers]
+        recovery.archive_local(details, "lots", saved, removed, workbook=workbook)
         changes = dict.fromkeys(removed)
         changes[workbook] = workbook_data
         changes[details] = details_data
@@ -104,10 +119,29 @@ def restore(
         if len(added) != len(lots):
             raise ValueError("A lot with that number has been added since.")
         details_data = lot_details.prepare(details, added)
+        if any(p.exists() for p in photos):
+            raise ValueError(
+                "A photo with that name already exists; nothing was overwritten."
+            )
         changes: dict[Path, bytes | None] = dict(photos)
         changes[workbook] = workbook_data
         changes[details] = details_data
         _commit(workbook, changes)
+
+
+def delete_auction(workbook: Path, details: Path, photos_dir: Path) -> None:
+    """Archive all lots/photos durably before the transactional removal."""
+    with storage.lock:
+        lots = load(workbook, details)
+        photos = {p: p.read_bytes() for p in photos_dir.glob("*.jpg")}
+        recovery.archive_local(details, "auction", lots, photos, workbook=workbook)
+        changes = dict.fromkeys(photos)
+        changes[workbook] = None
+        changes[details] = None
+        _commit(workbook, changes)
+        # Empty directories are not transaction data. Leave unknown files alone.
+        if photos_dir.exists() and not any(photos_dir.iterdir()):
+            photos_dir.rmdir()
 
 
 class Cache:

@@ -23,8 +23,10 @@ what it needs. The lot editor shows the lot's title as its heading, with
 into **Identification**, **Specs & compliance**, and **Listing**. Photos and
 consignment appear beside them on wide windows and below them on narrow ones. Drag
 photos onto the Photos area or use **Add photos…**. The serial lookup sites appear
-as buttons under the Serial # field. Title and description are marked **Auto-filled** because
-the app keeps make, model and condition text up to date. The header holds previous/next
+as buttons under the Serial # field, whose entered text is bright red. Title sits
+above Condition and CA legality. Title and description are marked **Auto-filled**:
+generated text updates as you type, without waiting for a save, while manual edits
+are preserved. The header holds previous/next
 lot, **New lot** (Ctrl+N), **Research**, and **⋯** with the Excel export for the
 lot's auction and Delete. Right-click a lot or auction in the sidebar for New lot,
 Export and Delete; the sidebar list can also be used with the keyboard (arrows,
@@ -235,6 +237,25 @@ JPEG, PNG and WebP are supported (not HEIC): 12 MiB and 30 megapixels per image,
 24 images and 100 MiB per session. Camera metadata is stripped. Nothing is sent
 to AI until a separate research/identification request is explicitly made.
 
+## Guided auction spell check
+
+Open any lot in the auction, then click **Spell check auction…** in the top bar.
+The current lot must save successfully before review starts. The review checks
+saved **titles and descriptions** across that auction using the same offline
+English and personal dictionaries as the editor. Serial tokens are excluded even
+when embedded in titles/descriptions, including alphabetic serials. Identifier
+fields, photos, and research packets are not rewritten. Replacements that would
+exceed the title's 100-character limit are refused, not silently shortened.
+
+Each finding shows its lot, field, highlighted word and surrounding text. Choose
+a suggested word (or type your own), then **Replace** to save just that occurrence.
+**Skip** leaves only that occurrence alone; **Add to dictionary** saves the word
+to this computer's personal dictionary and leaves the lot unchanged. There is no
+automatic correction or Replace all. **Close** ends the review; replacements
+already saved remain saved. A changed or deleted lot is rejected rather than
+overwritten: close and reopen spell check to review fresh data. Shared saves use
+the host's existing conflict checks and do not fall back to writing a local copy.
+
 ## Full backups and consignor review sheets
 
 **Tools → Back up / restore…** creates a new full backup of the main folder,
@@ -367,6 +388,37 @@ subsequent exports in both modes; keep the exported CSV until labels have been p
 An export commits its CSV and progress together, with rollback on write failure.
 
 ## Saving and recovery
+
+**Tools → Recover deleted items…** retains deleted catalogue lots and auctions,
+including saved lot details, evidence packets and photos, across app restarts.
+Choose the shared host history or this computer's standalone history. **Restore
+deleted items** restores an entire deletion only if none of its lot numbers (or
+the deleted auction number) has been reused; it never overwrites current work.
+Restore a deleted auction before restoring separately deleted lots within it.
+The short-lived **Undo** notice is still available, but is no longer your only
+recovery route.
+
+Changed lot saves also retain the previous saved text/details and photos as a
+**Previous saved revision**. Use **Export snapshot…** to write `snapshot.json`
+and JPEGs into a new `recovered-…` folder. Copy wanted text or add recovered photos
+back manually; revision export never replaces the current lot or photo order.
+Removed/replaced saved photos are included in these revisions. New unsaved edits
+that were never saved are not catalogue history. Before **Reload from host**
+replaces dirty drafts, the app preserves lot/shipping JSON and independent photo
+copies in `data/shared-drafts`; recovery offers **Open unsaved drafts folder**.
+Reload stops if preservation or photo downloads fail. An earlier save completing
+also no longer replaces photo edits made while it was running.
+
+Archives are written before local deletion; if writing the archive fails, deletion
+stops. Shared deletion and its archive commit in the same SQLite transaction.
+Local history is `data/recovery.sqlite3`; shared history is inside the host's
+`data/shared.sqlite3`, available to paired clients while the host is reachable.
+History is retained (not automatically purged) and the existing full-backup tool
+includes it. Keep full backups on a separate disk: recovery history is not protection
+against losing the working disk. History starts with this feature; earlier deletions
+require an existing full backup or the operating system's Trash/Recycle Bin.
+This covers catalogue deletion and previous saved lot revisions, not arbitrary
+external file deletion, unsaved typing, or shipping-history rollback.
 
 - Saving validates all photos and the lot-details JSON before changing files.
   Workbooks, details and photos are committed together, with rollback if a write

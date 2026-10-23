@@ -500,6 +500,7 @@ class LotForm(QWidget):
         self.model.setPlaceholderText(strings.MODEL_PLACEHOLDER)
         self.model.editingFinished.connect(self._apply_title_fields)
         self.serial = QLineEdit()
+        self.serial.setStyleSheet("QLineEdit { color: #ff0000; }")
         self.serial.setPlaceholderText(strings.SERIAL_PLACEHOLDER)
         self.serial.editingFinished.connect(self._on_serial_done)
         self.serial.textChanged.connect(self._update_lookup_row)
@@ -584,7 +585,7 @@ class LotForm(QWidget):
         self._custom_grid: _FieldGrid | None = None
         self.custom_card.hide()
 
-        # Listing: condition and CA legality stay side by side above the title.
+        # Listing: title first, then condition and CA legality side by side.
         self.condition = QComboBox()
         self.condition.setPlaceholderText(strings.PICK_CONDITION)
         self.condition.activated.connect(
@@ -617,8 +618,6 @@ class LotForm(QWidget):
         listing_layout.addWidget(
             _FieldGrid(
                 [
-                    (_field(strings.CONDITION, self.condition), False),
-                    (_field(strings.CA_LEGALITY, self.ca_legality), False),
                     (
                         _field(
                             strings.TITLE,
@@ -629,6 +628,8 @@ class LotForm(QWidget):
                         ),
                         True,
                     ),
+                    (_field(strings.CONDITION, self.condition), False),
+                    (_field(strings.CA_LEGALITY, self.ca_legality), False),
                 ],
                 max_columns=2,
             )
@@ -781,6 +782,20 @@ class LotForm(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setWidget(body)
         self.scroll = scroll
+        # Preview generated text on each keystroke, without normalizing the
+        # active input or waiting for autosave / editingFinished.
+        for edit in (
+            self.make,
+            self.model,
+            self.serial,
+            self.year,
+            self.caliber,
+            self.gun_type.lineEdit(),
+            self.barrel_length,
+            self.owner,
+            self.book_no,
+        ):
+            edit.textEdited.connect(self._preview_listing)
         return scroll
 
     def resizeEvent(self, event) -> None:
@@ -1026,11 +1041,8 @@ class LotForm(QWidget):
         )
 
     def collect_for_save(self) -> Lot:
-        """The lot to save: as collect(), but with the title's generated parts
-        matching the saved fields. While a field is still being typed in its
-        value isn't in the title yet (that happens when editing finishes);
-        saving it with the old title would make the next load add the
-        generated text a second time."""
+        """Collect with generated title parts matching the saved fields,
+        including programmatic changes that did not emit textEdited."""
         current = self.collect()
         title = update_title(
             self.title.text(),
@@ -1069,6 +1081,7 @@ class LotForm(QWidget):
             edit.setAccessibleName(custom.label)
             edit.textChanged.connect(self._mark_dirty)
             edit.editingFinished.connect(self._apply_title_fields)
+            edit.textEdited.connect(self._preview_listing)
             self._custom_inputs[custom.id] = edit
             items.append((_field(custom.label, edit), False))
         if items:
@@ -1247,6 +1260,13 @@ class LotForm(QWidget):
                 position = edit.cursorPosition()
                 edit.setText(value)
                 edit.setCursorPosition(min(position, len(value)))
+        self._apply_desc_fields(self.collect())
+        self._apply_condition()
+
+    def _preview_listing(self) -> None:
+        """Update generated text without altering the field being typed in."""
+        if self._lot is None or self._loading:
+            return
         self._apply_desc_fields(self.collect())
         self._apply_condition()
 

@@ -244,6 +244,35 @@ def test_edits_made_while_saving_stay_unsaved(window, monkeypatch):
     assert window._autosave.isActive()
 
 
+def test_photo_arriving_during_save_is_not_replaced_by_saved_paths(
+    window, tmp_path, monkeypatch
+):
+    window.create_auction()
+    first, incoming = tmp_path / "first.png", tmp_path / "incoming.png"
+    Image.new("RGB", (100, 100), "red").save(first)
+    Image.new("RGB", (100, 100), "blue").save(incoming)
+    window.form.set_photos([first])
+    window.form._mark_dirty()
+    save = catalogue.save
+
+    def slow_save(*args):
+        time.sleep(0.15)
+        return save(*args)
+
+    monkeypatch.setattr(catalogue, "save", slow_save)
+
+    def incoming_photo():
+        window.form.set_photos([first, incoming])
+        window.form._mark_dirty()
+
+    QTimer.singleShot(20, incoming_photo)
+    assert window.flush()
+    assert window.form.collect().photos == [first, incoming]
+    assert window.form.is_dirty()
+    assert window.flush()
+    assert len(window.form.collect().photos) == 2
+
+
 def test_workbook_write_failure_uses_workbook_warning_and_retries(window, monkeypatch):
     window.create_auction()
     window.form.title.setText("Unsaved")

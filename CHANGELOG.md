@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.15 — 2026-10-23
+
+### Added
+
+- Offline auction-wide spelling review for titles and descriptions, with explicit
+  replacement, skip, and personal-dictionary controls.
+- Persistent recovery for deleted lots and auctions, including photos, in local
+  and shared catalogues via Tools → Recover deleted items.
+- Previous saved lot revisions can be exported with photos for manual recovery.
+  Recovery starts with this update; separate full backups are still recommended.
+
+### Changed
+
+- Serial-number text is bright red; Title appears above Condition and CA legality.
+- Generated titles and descriptions update while typing, preserving manual edits.
+- The C&R checkbox and generated qualifier now read simply C&R.
+
+### Fixed
+
+- Host reload preserves unsaved drafts and independent photo copies before
+  replacing the form, and stops if preservation or downloads fail.
+- Save completion no longer replaces photo edits made while the save was running.
+- Spell-check saves reject conflicting edits instead of overwriting newer work.
+
 ## 0.1.14 — 2026-10-16
 
 ### Added

@@ -246,7 +246,7 @@ def update_desc(
 # "Arsenal SAM7SF 7.62x39 Rifle SN: BE 53 1936 Excellent Condition LEGAL FOR CA".
 CA_TITLE_TEXT = {"Legal for CA": "LEGAL FOR CA", "Not CA legal": "NOT LEGAL FOR CA"}
 PREVIOUS_CA_TITLE_TEXT = {"Legal for CA": "OK FOR CA", "Not CA legal": "NOT CA LEGAL"}
-C_AND_R_TITLE_TEXT = "C&R ELIGIBLE"
+C_AND_R_TITLE_TEXT = "C&R"
 # Fields that alone don't make a title (a lot with just a condition stays
 # untitled until something describes the item).
 _QUALIFIERS = frozenset({"condition", "ca_legality", "c_and_r"})
@@ -305,6 +305,9 @@ def _strip(
 
     def parts(key: str) -> tuple[str, ...]:
         current = _value(lot, key, prefix_for, legacy)
+        if key == "c_and_r" and current:
+            # Match the longer previous wording first, including before Title.
+            return "C&R ELIGIBLE", current
         if key == "ca_legality" and not legacy:
             return current, PREVIOUS_CA_TITLE_TEXT.get(lot.ca_legality, "")
         return (current,)

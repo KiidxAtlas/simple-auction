@@ -1,7 +1,8 @@
 """Manual descriptions own their text; name formatting does not restore deletions."""
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QSettings
+from PySide6.QtCore import QCoreApplication, QEvent, QSettings, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from simple_auction.services import catalogue
@@ -142,3 +143,74 @@ def test_explicit_condition_selection_restores_deleted_wording(window, condition
     window.open_lot(auction, number)
     assert expected_title in form.title.text()
     assert expected_desc in form.desc.toPlainText()
+
+
+def test_typing_previews_listing_before_save_without_changing_input(window):
+    form = window.form
+    form.set_desc_fields(["make", "model", "serial"])
+    for field, text, expected in (
+        (form.make, "sig sauer", "Sig Sauer"),
+        (form.model, "p320", "P320"),
+        (form.serial, "abc-001x", "abc-001x"),
+    ):
+        QTest.keyClicks(field, text)
+        assert field.text() == text
+        assert field.cursorPosition() == len(text)
+        assert expected in form.title.text()
+        assert expected in form.desc.toPlainText()
+    assert form.is_dirty()
+    assert window._autosave.isActive()
+    assert window.flush()
+    saved = catalogue.load(
+        window._path(window.auction_no), window._details(window.auction_no)
+    )[0]
+    assert saved.title == form.title.text()
+    assert saved.desc == form.desc.toPlainText()
+
+
+def test_live_preview_preserves_manual_description(window):
+    form = window.form
+    QTest.keyClicks(form.make, "colt")
+    QTest.keyClicks(form.model, "anaconda")
+    form.desc.setPlainText("My own notes.")
+    form.title.setText(form.title.text() + " Custom wording")
+    form.model.selectAll()
+    QTest.keyClicks(form.model, "python")
+    assert "Colt Python" in form.title.text()
+    assert "Custom wording" in form.title.text()
+    assert form.desc.toPlainText() == "My own notes."
+
+
+def test_title_above_condition_and_serial_is_red(window):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QColor, QPalette
+
+    window.show()
+    QApplication.processEvents()
+    form = window.form
+    title_y = form.title.mapTo(form, QPoint()).y()
+    assert title_y < form.condition.mapTo(form, QPoint()).y()
+    assert title_y < form.ca_legality.mapTo(form, QPoint()).y()
+    assert form.serial.palette().color(QPalette.ColorRole.Text) == QColor("#ff0000")
+
+
+def test_live_field_clearing_preserves_handwritten_text_through_reopen(window):
+    form = window.form
+    QTest.keyClicks(form.make, "colt")
+    QTest.keyClicks(form.model, "python")
+    form.title.setText(form.title.text() + " Hand inspected")
+    form.desc.setPlainText(
+        "Make: Colt (verified by owner)\nModel: Python\n\nKeep these inspection notes."
+    )
+    form.make.selectAll()
+    QTest.keyClick(form.make, Qt.Key.Key_Backspace)
+    assert "Hand inspected" in form.title.text()
+    assert "Make: Colt (verified by owner)" in form.desc.toPlainText()
+    assert "Keep these inspection notes." in form.desc.toPlainText()
+    assert window.flush()
+    auction, number = window.auction_no, window.lot_no
+    window.create_lot(auction)
+    window.open_lot(auction, number)
+    assert "Hand inspected" in form.title.text()
+    assert "Make: Colt (verified by owner)" in form.desc.toPlainText()
+    assert "Keep these inspection notes." in form.desc.toPlainText()

@@ -122,6 +122,9 @@ def test_conflicting_draft_is_retained_and_explicit_reload_resolves(
     )
     b.reload_shared()
     assert b.form.title.text() == "Alice" and not b.form.is_dirty()
+    drafts = list((b.config.data_dir / "shared-drafts").glob("*.json"))
+    assert len(drafts) == 1
+    assert json.loads(drafts[0].read_text())["lot"]["title"] == "Bob draft"
 
 
 def test_shipping_ui_merges_updates_and_recovers_failed_download(
@@ -448,3 +451,61 @@ def test_saved_client_reconnects_when_host_returns_at_new_address(
         if moved:
             moved.close()
         app.processEvents()
+
+
+def test_remote_deletion_keeps_dirty_local_form(windows):
+    a, b = windows
+    a.create_auction()
+    poll(b)
+    b.open_lot(a.auction_no, a.lot_no)
+    b.form.title.setText("Keep my unsaved work")
+    snapshot = a.client.snapshot()
+    a.client.request(
+        "delete",
+        auction=a.auction_no,
+        numbers=[a.lot_no],
+        expected=snapshot["auctions"][str(a.auction_no)],
+    )
+    poll(b)
+    assert b.form.is_dirty()
+    assert b.form.title.text() == "Keep my unsaved work"
+    assert not b.flush()
+    assert b.form.title.text() == "Keep my unsaved work"
+
+
+def test_reload_stops_if_draft_cannot_be_preserved(windows, monkeypatch):
+    a, b = windows
+    a.create_auction()
+    poll(b)
+    b.open_lot(a.auction_no, a.lot_no)
+    b.form.title.setText("Keep this draft")
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes
+    )
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
+
+    def fail():
+        raise OSError("Disk full")
+
+    monkeypatch.setattr(b, "_connection_drafts", fail)
+    b.reload_shared()
+    assert b.form.title.text() == "Keep this draft"
+    assert b.form.is_dirty()
+    assert warnings
+
+
+def test_preserved_draft_contains_independent_photo_copy(windows, tmp_path):
+    from pathlib import Path
+
+    a, _ = windows
+    a.create_auction()
+    source = tmp_path / "draft-photo.png"
+    Image.new("RGB", (100, 100), "green").save(source)
+    a.form.set_photos([source])
+    a.form._mark_dirty()
+    draft = a._connection_drafts()
+    data = json.loads(draft["backup"].read_text())
+    copied = Path(data["lot"]["photos"][0])
+    assert copied != source
+    assert copied.read_bytes() == source.read_bytes()

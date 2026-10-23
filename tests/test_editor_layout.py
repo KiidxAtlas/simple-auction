@@ -98,7 +98,7 @@ def test_legality_is_beside_condition_and_curio_relic_is_in_identification(app, 
     form.c_and_r.click()
     lot = form.collect()
     assert lot.ca_legality == "Legal for CA" and lot.c_and_r
-    assert "LEGAL FOR CA" in lot.title and "C&R ELIGIBLE" in lot.title
+    assert "LEGAL FOR CA" in lot.title and "C&R" in lot.title
 
 
 @pytest.mark.parametrize(
@@ -160,3 +160,24 @@ def test_migrating_title_wording_does_not_restore_deleted_qualifier():
         title_fields=fields,
     )
     assert update_title(lot.title, lot, fields, lot, fields) == lot.title
+
+
+@pytest.mark.parametrize("before_title", [False, True])
+def test_previous_c_and_r_wording_is_shortened_without_duplication(before_title):
+    fields = (
+        ["c_and_r", "make", "title"] if before_title else ["make", "title", "c_and_r"]
+    )
+    title = (
+        "C&R ELIGIBLE Colt Specimen" if before_title else "Colt Specimen C&R ELIGIBLE"
+    )
+    expected = "C&R Colt Specimen" if before_title else "Colt Specimen C&R"
+    lot = Lot(1, title=title, make="Colt", c_and_r=True, title_fields=fields)
+    updated = update_title(title, lot, fields, lot, fields)
+    assert updated == expected
+    saved = replace(lot, title=updated)
+    assert update_title(updated, saved, fields, saved, fields) == expected
+    assert (
+        update_title(title, lot, fields, replace(lot, c_and_r=False), fields)
+        == "Colt Specimen"
+    )
+    assert update_title("Colt Specimen", lot, fields, lot, fields) == "Colt Specimen"

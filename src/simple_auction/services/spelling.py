@@ -8,7 +8,9 @@ Config or network dependency. Widget owners must exclude passwords and identifie
 import json
 import re
 from collections import OrderedDict
+from functools import wraps
 from pathlib import Path
+from threading import RLock
 
 from spellchecker import SpellChecker
 
@@ -176,6 +178,17 @@ def _remember(cache: OrderedDict, key: str, value, limit: int):
     return value
 
 
+def _serialized(method):
+    """Serialize checker/cache access between editor timers and review workers."""
+
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return call
+
+
 class Spelling:
     """Offline English spellchecking with bounded per-instance result caches.
 
@@ -185,6 +198,7 @@ class Spelling:
     """
 
     def __init__(self, path: Path | None = None):
+        self._lock = RLock()
         self.path = (
             Path(path)
             if path is not None
@@ -237,6 +251,7 @@ class Spelling:
         self._checks.clear()
         self._suggestions.clear()
 
+    @_serialized
     def correct(self, word: str) -> bool:
         key = _normal(word)
         if key in self._checks:
@@ -254,6 +269,7 @@ class Spelling:
         )
         return _remember(self._checks, key, correct, 2048)
 
+    @_serialized
     def suggest(self, word: str) -> list[str]:
         if self.correct(word) or len(word) > 32:
             return []
@@ -277,6 +293,7 @@ class Spelling:
             return [suggestion.capitalize() for suggestion in suggestions]
         return list(suggestions)
 
+    @_serialized
     def ignore(self, word: str) -> None:
         if not _is_word(word):
             return
@@ -285,6 +302,7 @@ class Spelling:
             self._ignored.add(key)
             self._changed()
 
+    @_serialized
     def add(self, word: str) -> None:
         """Persist a word atomically or raise OSError/ValueError, never fake success."""
         if not _is_word(word):

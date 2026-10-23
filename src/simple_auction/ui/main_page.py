@@ -282,10 +282,14 @@ class MainPage(QMainWindow):
         theme.set_icon(self.reload_shared_button, "refresh")
         self.reload_shared_button.clicked.connect(self.reload_shared)
         layout.addWidget(self.reload_shared_button)
+        self.spellcheck_button = QPushButton("Spell check auction…")
+        self.spellcheck_button.clicked.connect(self.spellcheck_auction)
+        layout.addWidget(self.spellcheck_button)
         tools = QPushButton("Tools")
         tools_menu = QMenu(tools)
         tools_menu.addAction("Ready to publish — work queue…", self.open_work_queue)
         tools_menu.addAction("Back up / restore…", self.backup_restore)
+        tools_menu.addAction("Recover deleted items…", self.recover_deleted)
         tools_menu.addAction("Consignor review sheets…", self.review_sheets)
         tools.setMenu(tools_menu)
         layout.addWidget(tools)
@@ -586,7 +590,7 @@ class MainPage(QMainWindow):
         # Something may have changed the form while the save ran (e.g. a serial
         # lookup result); those edits aren't on disk yet, so keep them dirty.
         unchanged = self.form.collect() == shown
-        if photos != lot.photos:
+        if photos != lot.photos and self.form.collect().photos == shown.photos:
             self.form.set_photos(photos)
         if unchanged:
             self.form.mark_saved()
@@ -908,6 +912,9 @@ class MainPage(QMainWindow):
             except ExcelLockedError:
                 self._locked_warning()
                 continue
+            except (OSError, ValueError) as e:
+                QMessageBox.warning(self, "Deletion stopped", str(e))
+                continue
             self.output.forget(auction_no, numbers)
             if saved:
                 backups.append((auction_no, saved, removed))
@@ -916,14 +923,20 @@ class MainPage(QMainWindow):
                 self._clear()
 
         for auction_no in auctions:
-            if not self._trash(self._path(auction_no)):
+            try:
+                self._io(
+                    strings.IO_DELETING,
+                    partial(
+                        catalogue.delete_auction,
+                        self._path(auction_no),
+                        self._details(auction_no),
+                        self._images_dir(auction_no),
+                    ),
+                )
+            except (OSError, ValueError, ExcelLockedError) as e:
+                QMessageBox.warning(self, "Deletion stopped", str(e))
                 continue
             self.output.forget(auction_no)
-            if self._details(auction_no).exists():
-                self._trash(self._details(auction_no))
-            images = self._images_dir(auction_no)
-            if images.exists():
-                self._trash(images)
             if self.auction_no == auction_no:
                 self._clear()
 
@@ -1585,7 +1598,7 @@ class MainPage(QMainWindow):
             and QMessageBox.question(
                 self,
                 "Reload from host",
-                "Reloading will discard your unsaved edits and load the host's latest data. Continue?",
+                "Your unsaved edits will be kept in a recovery draft before loading the host's latest data. Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -1593,16 +1606,13 @@ class MainPage(QMainWindow):
         ):
             return
         try:
+            drafts = self._connection_drafts() if dirty else None
             snapshot = self._io("Reloading from host…", self._client().snapshot)
             record = self._record(snapshot, self.auction_no, self.lot_no)
             if record:
                 lot = self._io(
                     "Downloading photos…", lambda: self._client().materialize(record)
                 )
-                self._shared_base = record
-                self.form.load(lot, self.auction_no)
-            else:
-                self._clear()
             path = self.shipping.path
             batch = (
                 self._io(
@@ -1612,11 +1622,18 @@ class MainPage(QMainWindow):
                 if path
                 else None
             )
+            if record:
+                self._shared_base = record
+                self.form.load(lot, self.auction_no)
+            else:
+                self._clear()
             self.shipping.dirty = False
             self.shipping._save_timer.stop()
             self.shipping.sync_snapshot(snapshot["shipping"], batch)
             self._apply_snapshot(snapshot)
-        except network.NetworkError as e:
+            if drafts:
+                self._status(f"Previous edits preserved in {drafts['backup']}")
+        except (OSError, ValueError, network.NetworkError) as e:
             QMessageBox.warning(self, "Sharing", str(e))
 
     def _stop_sharing(self):
@@ -1659,12 +1676,19 @@ class MainPage(QMainWindow):
             network.batch_data(drafts["shipping"]) if drafts["shipping"] else None
         )
         path = self.config.data_dir / "shared-drafts" / (uuid4().hex + ".json")
-        self._io(
-            "Preserving unsaved edits…",
-            lambda: storage.atomic_write(
-                path, json.dumps(serializable, default=str).encode()
-            ),
-        )
+
+        def preserve():
+            # Snapshot the actual photos too, not only temporary source paths.
+            if lot:
+                photos = []
+                for index, source in enumerate(lot.photos):
+                    target = path.with_suffix(".photos") / f"{index}{source.suffix}"
+                    storage.atomic_write(target, source.read_bytes())
+                    photos.append(str(target))
+                serializable["lot"]["photos"] = photos
+            storage.atomic_write(path, json.dumps(serializable, default=str).encode())
+
+        self._io("Preserving unsaved edits…", preserve)
         drafts["backup"] = path
         return drafts
 
@@ -1757,6 +1781,96 @@ class MainPage(QMainWindow):
             return auctions
 
         return self._io("Preparing catalogue review…", load)
+
+    def spellcheck_auction(self) -> None:
+        from simple_auction.services import auction_spelling
+        from simple_auction.ui.auction_spellcheck_dialog import AuctionSpellcheckDialog
+        from simple_auction.ui.spellcheck import install_spellcheck
+
+        auction = self.auction_no
+        if auction is None:
+            QMessageBox.information(
+                self, "Spell check", "Open a lot in the auction to review first."
+            )
+            return
+        if not self._leave_lot():
+            return
+        try:
+            client = self._client() if self.shared else None
+        except network.NetworkError as error:
+            QMessageBox.warning(self, "Spell check", str(error))
+            return
+        records = {}
+
+        checker = install_spellcheck(QApplication.instance()).checker
+
+        def load():
+            if client is not None:
+                snapshot = client.snapshot()
+                records.update(
+                    {
+                        record["lot_number"]: record
+                        for record in snapshot["auctions"].get(str(auction), [])
+                    }
+                )
+                lots = [client.materialize(record) for record in records.values()]
+            else:
+                lots = auction_spelling.load_local(
+                    self._path(auction),
+                    self._details(auction),
+                    self._images_dir(auction),
+                )
+            return lots, auction_spelling.Review(lots, checker)
+
+        try:
+            lots, review = self._io("Preparing auction spell check…", load)
+        except (OSError, ValueError, network.NetworkError) as error:
+            QMessageBox.warning(self, "Spell check", str(error))
+            return
+
+        def save(expected, updated):
+            if (self.auction_no, self.lot_no) == (
+                auction,
+                updated.lot_number,
+            ) and self.form.is_dirty():
+                raise ValueError(
+                    "The open lot has new edits. Close spell check and save them first."
+                )
+
+            def commit():
+                if client is not None:
+                    record = client.save_lot(
+                        auction, updated, records[updated.lot_number]
+                    )
+                    committed = client.materialize(record)
+                    records[updated.lot_number] = record
+                    return committed, {}
+                return auction_spelling.save_local(
+                    self._path(auction),
+                    self._details(auction),
+                    self._images_dir(auction),
+                    expected,
+                    updated,
+                )
+
+            committed, removed = self._io("Saving spelling replacement…", commit)
+            self._recycle(removed, self._images_dir(auction))
+            self.sidebar.update_lot(auction, committed)
+            self._catalogue_lots[auction] = [
+                committed if lot.lot_number == committed.lot_number else lot
+                for lot in self._catalogue_lots.get(auction, lots)
+            ]
+            if (self.auction_no, self.lot_no) == (
+                auction,
+                committed.lot_number,
+            ) and not self.form.is_dirty():
+                self.form.load(committed, auction)
+                if client is not None:
+                    self._shared_base = records[committed.lot_number]
+            self._track_progress(auction, committed)
+            return committed
+
+        AuctionSpellcheckDialog(auction, review, save, self).exec()
 
     def open_work_queue(self) -> None:
         from simple_auction.ui.workflow_dialogs import WorkQueueDialog
@@ -1891,3 +2005,15 @@ class MainPage(QMainWindow):
         if accepted:
             auction = int(text)
             ReviewSheetDialog(auction, auctions[auction], self).exec()
+
+    def recover_deleted(self) -> None:
+        from simple_auction.ui.recovery_dialog import RecoveryDialog
+
+        if not self._leave_lot():
+            return
+        dialog = RecoveryDialog(
+            self.config, self._client() if self.shared else None, self
+        )
+        dialog.exec()
+        self.refresh()
+        self._update_counts()
