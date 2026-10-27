@@ -1,4 +1,5 @@
 import base64
+import csv
 import json
 import socket
 
@@ -76,7 +77,7 @@ def poll(window):
     assert window._poll_worker is None
 
 
-def test_two_windows_share_create_edit_photos_and_excel(windows, tmp_path, monkeypatch):
+def test_two_windows_share_create_edit_photos_and_csv(windows, tmp_path, monkeypatch):
     a, b = windows
     a.create_auction()
     a.form.title.setText("Shared title")
@@ -94,13 +95,59 @@ def test_two_windows_share_create_edit_photos_and_excel(windows, tmp_path, monke
     assert b.flush()
     poll(a)
     assert a.form.owner.text() == "Other person"
-    output = tmp_path / "export.xlsx"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args: (str(output), ""))
-    a.export_auction(a.auction_no)
-    from simple_auction.services.excel import load_auction
+    output = tmp_path / "export.csv"
 
-    lots = load_auction(output)
-    assert lots[0].owner == "Other person" and lots[0].title == "Shared title"
+    def choose_export(*args):
+        assert args[2].endswith(f"{a.auction_no}.csv")
+        assert args[3] == "CSV (*.csv)"
+        return str(output), ""
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", choose_export)
+    a.export_auction(a.auction_no)
+    with output.open(encoding="utf-8-sig", newline="") as stream:
+        lots = list(csv.DictReader(stream))
+    assert lots[0]["Owner"] == "Other person"
+    assert lots[0]["Title"] == "Shared title"
+
+
+@pytest.mark.parametrize("filename", ["export.csv", "export.xlsx", ""])
+def test_local_csv_export_and_cancel(app, tmp_path, monkeypatch, filename):
+    page = main_page.MainPage(
+        Config(base_dir=tmp_path / "local", photos_dir=tmp_path / "photos")
+    )
+    try:
+        page.create_auction()
+        page.form.title.setText('Café, "special"')
+        assert page.flush()
+        output = tmp_path / filename if filename else None
+        errors = []
+
+        def choose_export(*args):
+            assert args[2].endswith(f"{page.auction_no}.csv")
+            assert args[3] == "CSV (*.csv)"
+            return str(output) if output else "", ""
+
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", choose_export)
+        monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args))
+        page.export_auction(page.auction_no)
+        if filename == "export.csv":
+            with output.open(encoding="utf-8-sig", newline="") as stream:
+                lots = list(csv.DictReader(stream))
+            assert lots[0]["Title"] == 'Café, "special"'
+            assert not errors
+        elif output:
+            assert not output.exists()
+            assert len(errors) == 1
+        else:
+            assert not errors
+            assert not list(tmp_path.glob("*.csv"))
+    finally:
+        page._autosave.stop()
+        page.shipping._save_timer.stop()
+        page.form._dirty = False
+        page.close()
+        page.deleteLater()
+        app.processEvents()
 
 
 def test_conflicting_draft_is_retained_and_explicit_reload_resolves(

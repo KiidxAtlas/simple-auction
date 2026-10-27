@@ -1021,31 +1021,26 @@ class MainPage(QMainWindow):
         dest, _ = QFileDialog.getSaveFileName(
             self,
             strings.EXPORT,
-            str(Path.home() / "Documents" / f"{auction_no}.xlsx"),
-            "Excel (*.xlsx)",
+            str(Path.home() / "Documents" / f"{auction_no}.csv"),
+            "CSV (*.csv)",
         )
         if not dest:
+            return
+        if Path(dest).suffix.lower() != ".csv":
+            QMessageBox.critical(self, strings.EXPORT, strings.EXPORT_CSV_REQUIRED)
             return
         try:
             if self.shared:
 
                 def shared_export():
                     snapshot = self._client().snapshot()
-                    from openpyxl import Workbook
-
-                    wb = Workbook()
-                    try:
-                        wb.active.append(excel.HEADERS)
-                        if str(auction_no) not in snapshot["auctions"]:
-                            raise network.NetworkError("This auction was deleted")
-                        for data in snapshot["auctions"][str(auction_no)]:
-                            lot = Lot(
-                                **{k: v for k, v in data.items() if k != "photos"}
-                            )
-                            wb.active.append(excel._lot_to_row(lot))
-                        storage.atomic_write(Path(dest), excel._encode(wb))
-                    finally:
-                        wb.close()
+                    if str(auction_no) not in snapshot["auctions"]:
+                        raise network.NetworkError("This auction was deleted")
+                    lots = [
+                        Lot(**{k: v for k, v in data.items() if k != "photos"})
+                        for data in snapshot["auctions"][str(auction_no)]
+                    ]
+                    excel.export_lots(lots, Path(dest))
 
                 self._io("Exporting shared auction…", shared_export)
             else:

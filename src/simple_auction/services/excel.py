@@ -1,3 +1,4 @@
+import csv
 import io
 from contextlib import contextmanager
 from copy import copy
@@ -167,11 +168,22 @@ def delete_lots(path: Path, lot_numbers: set[int]) -> None:
 
 
 def export_auction(path: Path, destination: Path) -> None:
-    """Export older workbooks in the current column order without editing the source."""
+    """Export the active sheet as CSV without editing the source workbook."""
     with _edit_workbook(path) as wb:
         if not path.exists():
             raise FileNotFoundError(path)
-        _save(wb, destination)
+        _write_data(destination, _csv_data(wb.active.values))
+
+
+def export_lots(lots: list[Lot], destination: Path) -> None:
+    """Export shared lots with the same CSV columns as a local auction."""
+    _write_data(destination, _csv_data([HEADERS, *map(_lot_to_row, lots)]))
+
+
+def _csv_data(rows) -> bytes:
+    stream = io.StringIO(newline="")
+    csv.writer(stream).writerows(rows)
+    return stream.getvalue().encode("utf-8-sig")
 
 
 @contextmanager

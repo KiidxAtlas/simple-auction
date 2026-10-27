@@ -1,6 +1,6 @@
 # Simple Auction
 
-Desktop app for cataloguing auction lots, with photos, Excel exports, shipping,
+Desktop app for cataloguing auction lots, with photos, CSV exports, shipping,
 serial lookups and research. Optional local network sharing connects multiple computers.
 
 ## Run from source
@@ -27,7 +27,7 @@ as buttons under the Serial # field, whose entered text is bright red. Title sit
 above Condition and CA legality. Title and description are marked **Auto-filled**:
 generated text updates as you type, without waiting for a save, while manual edits
 are preserved. The header holds previous/next
-lot, **New lot** (Ctrl+N), **Research**, and **⋯** with the Excel export for the
+lot, **New lot** (Ctrl+N), **Research**, and **⋯** with the CSV export for the
 lot's auction and Delete. Right-click a lot or auction in the sidebar for New lot,
 Export and Delete; the sidebar list can also be used with the keyboard (arrows,
 Return to open or close an auction). On narrow windows the editor reflows into one
@@ -54,10 +54,12 @@ database opens). The Photos area shows each photo's size, rotates (left/right),
 previews at full size (double-click, arrow keys to move), and drag-to-reorder or
 **Make main photo** sets which photo is first.
 
-Auction workbooks and Excel exports use **Lot Number, Title, Description, Owner,
+Auction workbooks and CSV exports use **Lot Number, Title, Description, Owner,
 Book Number, Serial, Condition, Year**, in that order. Older app workbooks still
 load correctly and are reordered when saved or exported; exporting does not
-rewrite the source workbook. Existing lot values are retained.
+rewrite the source workbook. Existing lot values and extra columns are retained.
+Exports are comma-separated UTF-8 files with a BOM for spreadsheet compatibility;
+workbook formatting and additional sheets are not part of the CSV.
 
 Settings lists its sections on the left. **Auction setup** has the next auction
 number, the serial-number lookup sites and the serial table. **Conditions** lists
@@ -444,7 +446,7 @@ external file deletion, unsaved typing, or shipping-history rollback.
 - Only one app instance using the same settings folder can run at a time, to
   prevent overlapping save/recovery operations. Do not have separate app copies
   write directly to the same catalogue simultaneously. Use local network sharing
-  for simultaneous work. Excel exports are not full backups:
+  for simultaneous work. CSV exports are not full backups:
   keep backups of the main folder **and** your configured photos folder.
 - Research **Stop** cancels the HTTP request, including a wait for the first
   response or a stalled stream. Unfinished answers do not advance the chat history.

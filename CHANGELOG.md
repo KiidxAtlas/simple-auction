@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.17 — 2026-10-27
+
+### Changed
+
+- Local and shared auction exports now save CSV files instead of XLSX workbooks.
+  Export menus and the save dialog use CSV filenames and filters.
+- CSV exports retain the auction column order and values, including extra columns
+  in local workbooks, without changing the source workbook. Commas, quotes,
+  multiline text and Unicode are supported, using UTF-8 with a BOM for spreadsheet
+  compatibility. Workbook formatting and additional sheets are not exported.
+
 ## 0.1.16 — 2026-10-23
 
 ### Fixed

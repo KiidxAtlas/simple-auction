@@ -1,3 +1,5 @@
+import csv
+
 import pytest
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
@@ -95,7 +97,7 @@ def test_new_workbook_column_order_matches_values(tmp_path):
 def test_legacy_load_export_and_save_preserve_fields_and_formatting(
     tmp_path, include_year
 ):
-    path, exported = tmp_path / "41000.xlsx", tmp_path / "export.xlsx"
+    path, exported = tmp_path / "41000.xlsx", tmp_path / "export.csv"
     wb = Workbook()
     ws = wb.active
     headers = LEGACY_HEADERS if include_year else LEGACY_HEADERS[:-1]
@@ -124,27 +126,93 @@ def test_legacy_load_export_and_save_preserve_fields_and_formatting(
     assert excel.load_auction(path) == [lot]
     excel.export_auction(path, exported)
     assert path.read_bytes() == original
-    assert excel.load_auction(exported) == [lot]
+    with exported.open(encoding="utf-8-sig", newline="") as stream:
+        assert list(csv.reader(stream)) == [
+            [*EXPECTED_HEADERS, "Staff note"],
+            [
+                "41001",
+                "Rifle",
+                "Description text",
+                "Owner name",
+                "7",
+                "ABC",
+                "Good",
+                "1990" if include_year else "",
+                "Retain this extra column",
+            ],
+        ]
     excel.save_lot(path, lot)
-    for target in (path, exported):
-        wb = load_workbook(target)
-        try:
-            ws = wb.active
-            assert list(next(ws.values)) == [*EXPECTED_HEADERS, "Staff note"]
-            assert ws["I2"].value == "Retain this extra column"
-            assert ws["B2"].font.bold
-            assert ws["B2"].comment.text == "Title comment"
-            assert ws.column_dimensions["B"].width == 35
-            assert wb["Notes"]["A1"].value == "Retain this sheet"
-        finally:
-            wb.close()
+    wb = load_workbook(path)
+    try:
+        ws = wb.active
+        assert list(next(ws.values)) == [*EXPECTED_HEADERS, "Staff note"]
+        assert ws["I2"].value == "Retain this extra column"
+        assert ws["B2"].font.bold
+        assert ws["B2"].comment.text == "Title comment"
+        assert ws.column_dimensions["B"].width == 35
+        assert wb["Notes"]["A1"].value == "Retain this sheet"
+    finally:
+        wb.close()
     excel.add_lots(path, [Lot(41002, title="Next lot")])
     excel.delete_lots(path, {41001})
     assert excel.load_auction(path) == [Lot(41002, title="Next lot")]
 
 
 def test_export_missing_source_does_not_create_workbook(tmp_path):
-    destination = tmp_path / "export.xlsx"
+    destination = tmp_path / "export.csv"
     with pytest.raises(FileNotFoundError):
         excel.export_auction(tmp_path / "missing.xlsx", destination)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("shared", [False, True])
+@pytest.mark.parametrize("empty", [False, True])
+def test_export_csv_content(tmp_path, shared, empty):
+    source = tmp_path / "41000.xlsx"
+    destination = tmp_path / "export.csv"
+    lots = (
+        []
+        if empty
+        else [
+            Lot(
+                41001,
+                title='Café, "special"',
+                desc="Line one\nLine two",
+                owner="Zoë",
+                book_no="007",
+                serial="00123",
+                condition="Good",
+            )
+        ]
+    )
+    excel.create_auction(source)
+    for lot in lots:
+        excel.save_lot(source, lot)
+    original = source.read_bytes()
+    if shared:
+        excel.export_lots(lots, destination)
+    else:
+        excel.export_auction(source, destination)
+    expected = ",".join(EXPECTED_HEADERS) + "\r\n"
+    if not empty:
+        expected += (
+            '41001,"Café, ""special""","Line one\nLine two",Zoë,007,00123,Good,\r\n'
+        )
+    assert destination.read_bytes() == expected.encode("utf-8-sig")
+    assert source.read_bytes() == original
+
+
+def test_export_write_failure_preserves_source(tmp_path, monkeypatch):
+    source = tmp_path / "41000.xlsx"
+    destination = tmp_path / "export.csv"
+    excel.create_auction(source)
+    original = source.read_bytes()
+
+    def fail(*args):
+        raise PermissionError("Read-only destination")
+
+    monkeypatch.setattr(excel.storage, "atomic_write", fail)
+    with pytest.raises(excel.ExcelLockedError):
+        excel.export_auction(source, destination)
+    assert source.read_bytes() == original
     assert not destination.exists()
