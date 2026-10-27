@@ -192,9 +192,73 @@ def test_export_csv_content(tmp_path, shared, empty):
         excel.export_auction(source, destination)
     expected = ",".join(EXPECTED_HEADERS[:5]) + "\r\n"
     if not empty:
-        expected += '41001,"Café, ""special""","Line one\nLine two",Zoë,007\r\n'
+        expected += '41001,"Café, ""special""",Line one Line two,Zoë,007\r\n'
     assert destination.read_bytes() == expected.encode("utf-8-sig")
     assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_export_keeps_lots_on_one_line_and_preserves_empty_cells(tmp_path, shared):
+    source = tmp_path / "41000.xlsx"
+    destination = tmp_path / "export.csv"
+    lots = [
+        Lot(
+            41001,
+            title='Café,\r\n"special" Rifle',
+            desc="Make: Example\r\nModel: One\rCondition: Good\nWarranty: None\u2028End",
+            owner="Owner\nname",
+            book_no="007",
+            serial="PRIVATE-SERIAL",
+        ),
+        Lot(41002, title="Empty description", owner="Consignor", book_no="008"),
+        Lot(41003, title="Whitespace description", desc=" \t\r\n\u00a0"),
+    ]
+    excel.create_auction(source)
+    for lot in lots:
+        excel.save_lot(source, lot)
+    original = source.read_bytes()
+
+    if shared:
+        excel.export_lots(lots, destination)
+    else:
+        excel.export_auction(source, destination)
+
+    # Bulk Loader requires carriage returns removed, even inside quoted fields.
+    lines = destination.read_text(encoding="utf-8-sig").splitlines()
+    assert [next(csv.reader([line], strict=True)) for line in lines] == [
+        EXPECTED_HEADERS[:5],
+        [
+            "41001",
+            'Café, "special" Rifle',
+            "Make: Example Model: One Condition: Good Warranty: None End",
+            "Owner name",
+            "007",
+        ],
+        ["41002", "Empty description", "", "Consignor", "008"],
+        ["41003", "Whitespace description", " \t \u00a0", "", ""],
+    ]
+    assert source.read_bytes() == original
+
+
+def test_export_does_not_emit_empty_workbook_rows_as_lots(tmp_path):
+    source = tmp_path / "41000.xlsx"
+    destination = tmp_path / "export.csv"
+    excel.save_lot(source, Lot(41001, title="First", desc="First description"))
+    excel.save_lot(source, Lot(41002, title="Second", desc="Second description"))
+    wb = load_workbook(source)
+    wb.active.insert_rows(3)
+    wb.active["A8"].font = Font(bold=True)
+    wb.save(source)
+    wb.close()
+
+    excel.export_auction(source, destination)
+
+    with destination.open(encoding="utf-8-sig", newline="") as stream:
+        assert list(csv.reader(stream)) == [
+            EXPECTED_HEADERS[:5],
+            ["41001", "First", "First description", "", ""],
+            ["41002", "Second", "Second description", "", ""],
+        ]
 
 
 def test_export_write_failure_preserves_source(tmp_path, monkeypatch):

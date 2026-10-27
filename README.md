@@ -66,6 +66,26 @@ and all other columns are excluded. Exporting does not rewrite the source workbo
 Exports are comma-separated UTF-8 files with a BOM for spreadsheet compatibility;
 workbook formatting and additional sheets are not part of the CSV.
 
+Each lot occupies one physical line: line breaks inside exported fields become
+spaces. Empty cells remain empty CSV fields with their commas and column positions
+preserved, including trailing empty fields, just like Excel's CSV export. No
+placeholder text is inserted. Worksheet rows without a lot number are not exported.
+These changes affect the CSV only; saved descriptions keep their line breaks.
+Removing the Serial column does not remove serial text already saved inside a
+Title or Description.
+
+For Proxibid **Bulk Loader**, indicate that the first row contains column headings.
+Map **Lot Number → Lot Number**, **Title → Lot Title**, and
+**Description → Lot Description**. Leave Owner and Book Number unmapped unless
+you intentionally use a corresponding supported field; neither is a unique lot
+identity. Never map Description, Owner or Book Number to Lot Number or Import ID.
+Review the scan preview before importing: the lot-number column must contain
+the actual lot numbers, not headings or description fragments. Proxibid's
+[catalogue upload guide, page 16](https://www.proxibid.com/AnnouncementFiles/File/The_Complete_Proxibid_Welcome_Packet.pdf#page=16)
+requires carriage returns removed from descriptions, no duplicate lot numbers,
+and no rows without lot information. Always generate a new CSV after updating;
+an older exported file is not rewritten by an app update.
+
 Settings lists its sections on the left. **Auction setup** has the next auction
 number, the serial-number lookup sites and the serial table. **Conditions** lists
 the dropdown choices; select one to edit its name and description sentence on the

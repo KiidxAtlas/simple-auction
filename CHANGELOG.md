@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.20 — 2026-10-27
+
+### Fixed
+
+- Local and shared catalogue CSV exports now keep each lot on one physical line,
+  replacing line breaks inside fields with spaces for Proxibid Bulk Loader.
+- Empty cells remain empty CSV fields in their original column positions,
+  including trailing empty fields. No description placeholders are inserted.
+- Worksheet rows without lot numbers are no longer exported as empty lots.
+  Original saved text and lot numbers are unchanged; exports still contain only
+  Lot Number, Title, Description, Owner and Book Number, in that order.
+
+### Documentation
+
+- Added Proxibid field-mapping guidance and a reminder to generate a fresh CSV
+  after updating rather than reusing an older export.
+
 ## 0.1.19 — 2026-10-27
 
 ### Fixed

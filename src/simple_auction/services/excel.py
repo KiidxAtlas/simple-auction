@@ -183,7 +183,16 @@ def export_lots(lots: list[Lot], destination: Path) -> None:
 def _csv_data(rows) -> bytes:
     stream = io.StringIO(newline="")
     end = HEADERS.index("Book Number") + 1
-    csv.writer(stream).writerows(row[:end] for row in rows)
+    writer = csv.writer(stream)
+    for row in rows:
+        if row[0] is None:
+            continue
+        # Proxibid Bulk Loader requires one physical line per lot.
+        values = [
+            " ".join(str(value).splitlines()) if value is not None else ""
+            for value in row[:end]
+        ]
+        writer.writerow(values)
     return stream.getvalue().encode("utf-8-sig")
 
 
