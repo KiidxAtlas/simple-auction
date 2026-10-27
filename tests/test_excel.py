@@ -261,6 +261,72 @@ def test_export_does_not_emit_empty_workbook_rows_as_lots(tmp_path):
         ]
 
 
+@pytest.mark.parametrize("shared", [False, True])
+@pytest.mark.parametrize("empty", [False, True])
+def test_xlsx_export_preserves_text_identifiers_and_descriptions(
+    tmp_path, shared, empty
+):
+    source = tmp_path / "46000.xlsx"
+    destination = tmp_path / "export.xlsx"
+    lots = (
+        []
+        if empty
+        else [
+            Lot(
+                46000,
+                title='Rifle, "special"',
+                desc="First line\nSecond line",
+                owner="Owner",
+                book_no="07212026",
+                serial="PRIVATE-SERIAL",
+            ),
+            Lot(46001, title="Long identifier", book_no="00000000000000012345"),
+            Lot(46002, title="Literal identifier", book_no="=001+002"),
+            Lot(46003, title="Empty cells"),
+        ]
+    )
+    excel.create_auction(source)
+    for lot in lots:
+        excel.save_lot(source, lot)
+    wb = load_workbook(source)
+    wb.active["I1"] = "Staff note"
+    wb.active["I2"] = "Not for export"
+    wb.create_sheet("Private")
+    wb.save(source)
+    wb.close()
+    original = source.read_bytes()
+
+    if shared:
+        excel.export_lots(lots, destination)
+    else:
+        excel.export_auction(source, destination)
+
+    wb = load_workbook(destination)
+    try:
+        assert len(wb.worksheets) == 1
+        expected = [tuple(EXPECTED_HEADERS[:5])]
+        if not empty:
+            expected += [
+                (
+                    46000,
+                    'Rifle, "special"',
+                    "First line\nSecond line",
+                    "Owner",
+                    "07212026",
+                ),
+                (46001, "Long identifier", None, None, "00000000000000012345"),
+                (46002, "Literal identifier", None, None, "=001+002"),
+                (46003, "Empty cells", None, None, None),
+            ]
+            for row in wb.active.iter_rows(min_row=2, max_row=4):
+                assert row[4].data_type == "s"
+                assert row[4].number_format == "@"
+        assert list(wb.active.values) == expected
+    finally:
+        wb.close()
+    assert source.read_bytes() == original
+
+
 def test_export_write_failure_preserves_source(tmp_path, monkeypatch):
     source = tmp_path / "41000.xlsx"
     destination = tmp_path / "export.csv"

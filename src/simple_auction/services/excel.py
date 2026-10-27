@@ -168,16 +168,26 @@ def delete_lots(path: Path, lot_numbers: set[int]) -> None:
 
 
 def export_auction(path: Path, destination: Path) -> None:
-    """Export columns through Book Number as CSV without editing the source workbook."""
+    """Export five lot columns as CSV or XLSX without editing the source workbook."""
     with _edit_workbook(path) as wb:
         if not path.exists():
             raise FileNotFoundError(path)
-        _write_data(destination, _csv_data(wb.active.values))
+        _export_rows(wb.active.values, destination)
 
 
 def export_lots(lots: list[Lot], destination: Path) -> None:
-    """Export shared lots with the same CSV columns as a local auction."""
-    _write_data(destination, _csv_data([HEADERS, *map(_lot_to_row, lots)]))
+    """Export shared lots with the same columns and formats as a local auction."""
+    _export_rows([HEADERS, *map(_lot_to_row, lots)], destination)
+
+
+def _export_rows(rows, destination: Path) -> None:
+    if destination.suffix.lower() == ".csv":
+        data = _csv_data(rows)
+    elif destination.suffix.lower() == ".xlsx":
+        data = _xlsx_data(rows)
+    else:
+        raise ValueError("Choose a CSV (.csv) or Excel (.xlsx) destination.")
+    _write_data(destination, data)
 
 
 def _csv_data(rows) -> bytes:
@@ -194,6 +204,29 @@ def _csv_data(rows) -> bytes:
         ]
         writer.writerow(values)
     return stream.getvalue().encode("utf-8-sig")
+
+
+def _xlsx_data(rows) -> bytes:
+    wb = Workbook()
+    try:
+        ws = wb.active
+        end = HEADERS.index("Book Number") + 1
+        row_number = 0
+        for row in rows:
+            if row[0] is None:
+                continue
+            row_number += 1
+            for column, value in enumerate(row[:end], 1):
+                cell = ws.cell(row_number, column, value)
+                # Text identifiers and listing text must not become formulas.
+                if column > 1 and value is not None:
+                    cell.value = str(value)
+                    cell.data_type = "s"
+                if column == end:
+                    cell.number_format = "@"
+        return _encode(wb)
+    finally:
+        wb.close()
 
 
 @contextmanager

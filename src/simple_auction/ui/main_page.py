@@ -1018,16 +1018,21 @@ class MainPage(QMainWindow):
     def export_auction(self, auction_no: int) -> None:
         if not self._leave_lot():
             return
-        dest, _ = QFileDialog.getSaveFileName(
+        dest, selected = QFileDialog.getSaveFileName(
             self,
             strings.EXPORT,
-            str(Path.home() / "Documents" / f"{auction_no}.csv"),
-            "CSV (*.csv)",
+            str(Path.home() / "Documents" / str(auction_no)),
+            f"{strings.EXPORT_CSV_FILTER};;{strings.EXPORT_XLSX_FILTER}",
+            strings.EXPORT_CSV_FILTER,
         )
         if not dest:
             return
-        if Path(dest).suffix.lower() != ".csv":
-            QMessageBox.critical(self, strings.EXPORT, strings.EXPORT_CSV_REQUIRED)
+        destination = Path(dest)
+        if not destination.suffix:
+            ext = ".xlsx" if selected == strings.EXPORT_XLSX_FILTER else ".csv"
+            destination = Path(dest + ext)
+        if destination.suffix.lower() not in (".csv", ".xlsx"):
+            QMessageBox.critical(self, strings.EXPORT, strings.EXPORT_FORMAT_REQUIRED)
             return
         try:
             if self.shared:
@@ -1040,16 +1045,16 @@ class MainPage(QMainWindow):
                         Lot(**{k: v for k, v in data.items() if k != "photos"})
                         for data in snapshot["auctions"][str(auction_no)]
                     ]
-                    excel.export_lots(lots, Path(dest))
+                    excel.export_lots(lots, destination)
 
                 self._io("Exporting shared auction…", shared_export)
             else:
-                excel.export_auction(self._path(auction_no), Path(dest))
+                excel.export_auction(self._path(auction_no), destination)
         except OSError, network.NetworkError:
             log.exception("Exporting auction %s failed", auction_no)
             QMessageBox.critical(self, strings.EXPORT, strings.EXPORT_FAILED)
             return
-        self._status(strings.EXPORTED.format(path=dest))
+        self._status(strings.EXPORTED.format(path=destination))
 
     def import_auctions(self) -> None:
         """Import lots from old auction spreadsheets, one dialog per file."""

@@ -1,6 +1,6 @@
 # Simple Auction
 
-Desktop app for cataloguing auction lots, with photos, CSV exports, shipping,
+Desktop app for cataloguing auction lots, with photos, CSV/Excel exports, shipping,
 serial lookups and research. Optional local network sharing connects multiple computers.
 
 ## Run from source
@@ -27,7 +27,7 @@ as buttons under the Serial # field, whose entered text is bright red. Title sit
 above Condition and CA legality. Title and description are marked **Auto-filled**:
 generated text updates as you type, without waiting for a save, while manual edits
 are preserved. The header holds previous/next
-lot, **New lot** (Ctrl+N), **Research**, and **⋯** with the CSV export for the
+lot, **New lot** (Ctrl+N), **Research**, and **⋯** with the CSV/Excel export for the
 lot's auction and Delete. Right-click a lot or auction in the sidebar for New lot,
 Export and Delete; the sidebar list can also be used with the keyboard (arrows,
 Return to open or close an auction). On narrow windows the editor reflows into one
@@ -60,19 +60,32 @@ previews at full size (double-click, arrow keys to move), and drag-to-reorder or
 
 Auction workbooks use **Lot Number, Title, Description, Owner, Book Number,
 Serial, Condition, Year**, in that order. Older app workbooks still load correctly
-and are reordered when saved or exported. CSV exports include only **Lot Number,
-Title, Description, Owner, Book Number**, in that order; Serial, Condition, Year
-and all other columns are excluded. Exporting does not rewrite the source workbook.
-Exports are comma-separated UTF-8 files with a BOM for spreadsheet compatibility;
-workbook formatting and additional sheets are not part of the CSV.
-
-Each lot occupies one physical line: line breaks inside exported fields become
-spaces. Empty cells remain empty CSV fields with their commas and column positions
-preserved, including trailing empty fields, just like Excel's CSV export. No
-placeholder text is inserted. Worksheet rows without a lot number are not exported.
-These changes affect the CSV only; saved descriptions keep their line breaks.
+and are reordered when saved or exported. Both catalogue export formats include
+only **Lot Number, Title, Description, Owner, Book Number**, in that order;
+Serial, Condition, Year and all other columns are excluded. Neither export
+rewrites the source workbook or includes its formatting and additional sheets.
 Removing the Serial column does not remove serial text already saved inside a
 Title or Description.
+
+Use **Export to CSV or Excel…** and choose a file type:
+
+- **Proxibid CSV (.csv)** is the upload format. Each lot occupies one physical
+  line: line breaks inside fields become spaces. Empty cells remain empty fields
+  with their commas and column positions preserved, including trailing empty
+  fields; no placeholder text is inserted. The encoding is UTF-8 with a BOM.
+- **Excel workbook (.xlsx)** is for opening and editing in Excel. Book Number is
+  stored as literal Text, preserving leading zeros, long identifiers and
+  punctuation without formulas or apostrophe prefixes. Original multiline
+  descriptions are preserved.
+
+CSV has no cell-type information. Even quoted numbers can lose leading zeros or
+precision when Excel opens and resaves them, so use the XLSX choice for Excel
+work rather than opening the Proxibid CSV. Exports cannot infer missing zeros
+from values that were already changed in an older file.
+
+Worksheet rows without lot numbers are not exported in either format. Empty
+cells remain empty, and saved catalogue descriptions keep their original line
+breaks.
 
 For Proxibid **Bulk Loader**, indicate that the first row contains column headings.
 Map **Lot Number → Lot Number**, **Title → Lot Title**, and

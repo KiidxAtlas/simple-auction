@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.21 — 2026-10-27
+
+### Added
+
+- Local and shared auction export now offers Proxibid CSV and Excel workbook
+  formats, both containing only Lot Number, Title, Description, Owner and
+  Book Number.
+- Excel exports store Book Number as literal Text, preserving leading zeros and
+  long identifiers without formulas or apostrophe prefixes. Multiline
+  descriptions are preserved. Use XLSX for opening and editing in Excel;
+  CSV remains the clean one-line-per-lot upload format for Proxibid.
+- The save dialog adds the selected format's extension when no extension is
+  supplied. Existing catalogue files and previously shortened identifiers are
+  not changed.
+
 ## 0.1.20 — 2026-10-27
 
 ### Fixed
