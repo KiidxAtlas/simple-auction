@@ -240,6 +240,10 @@ class Database:
                 CREATE TABLE IF NOT EXISTS records (kind TEXT, key TEXT, data TEXT NOT NULL, PRIMARY KEY(kind,key));
                 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS exports (id TEXT PRIMARY KEY, batch TEXT NOT NULL, csv BLOB NOT NULL);
+                CREATE TABLE IF NOT EXISTS photo_publications (
+                    auction INTEGER, lot INTEGER, data TEXT NOT NULL,
+                    PRIMARY KEY(auction, lot)
+                );
             """)
             recovery.initialize(db)
             db.execute(
@@ -253,6 +257,10 @@ class Database:
         self._migrate()
         self._backfill_output()
         self._fix_photos()
+        with self.connect() as db:
+            for key, raw in db.execute("SELECT key,data FROM records WHERE kind='lot'"):
+                self._queue_photos(db, int(key.split("/")[0]), json.loads(raw))
+        self._publish_pending_photos()
 
     @contextmanager
     def connect(self):
@@ -508,7 +516,63 @@ class Database:
             {"records": records, "photos": recovery.photo_data(named)},
         )
 
+    @staticmethod
+    def _queue_photos(db, auction, record):
+        # Commit the projection work with the record so a crash cannot lose it.
+        db.execute(
+            "INSERT INTO photo_publications VALUES (?,?,?) "
+            "ON CONFLICT(auction,lot) DO UPDATE SET data=excluded.data",
+            (auction, record["lot_number"], json.dumps(record)),
+        )
+
+    def _publish_pending_photos(self):
+        with self.connect() as db:
+            for auction, lot, raw in db.execute(
+                "SELECT auction,lot,data FROM photo_publications"
+            ).fetchall():
+                self._publish_photos(auction, json.loads(raw))
+                db.execute(
+                    "DELETE FROM photo_publications WHERE auction=? AND lot=?",
+                    (auction, lot),
+                )
+
+    def _publish_photos(self, auction, record):
+        """Maintain user-facing copies; immutable shared assets remain authoritative."""
+        folder = self.config.auction_photos_dir(auction)
+        lot = record["lot_number"]
+        journal = folder / f".{lot}.transaction"
+        with storage.lock:
+            storage.recover(journal)
+            wanted = {
+                folder / f"{image.image_name(lot, i)}.jpg": self.asset(digest)
+                for i, digest in enumerate(record["photos"])
+            }
+            changes = {}
+            for path, source in wanted.items():
+                raw = source.read_bytes()
+                if not path.exists() or path.read_bytes() != raw:
+                    changes[path] = raw
+            for path in image.lot_photo_files(lot, folder):
+                if path not in wanted:
+                    changes[path] = None
+            if changes:
+                storage.commit(changes, journal)
+
     def dispatch(self, op, args):
+        # Keep publication serialized with saves, but only publish committed data.
+        with self.lock:
+            result = self._dispatch(op, args)
+            try:
+                self._publish_pending_photos()
+            except OSError as e:
+                raise NetworkError(
+                    f"The catalogue was saved, but its photo folder could not be "
+                    f"updated: {e}. Check disk space and folder permissions, then "
+                    f"reopen the host to rebuild the photo copies."
+                ) from e
+            return result
+
+    def _dispatch(self, op, args):
         with self.transaction() as db:
             if op == "snapshot":
                 # A computer uploads its own history before reading the host's.
@@ -552,6 +616,7 @@ class Database:
                     self.put(db, "auction", auction, {"number": auction})
                 for record in records:
                     self.put(db, "lot", f"{auction}/{record['lot_number']}", record)
+                    self._queue_photos(db, auction, record)
                     self._set_output(
                         db,
                         auction,
@@ -617,6 +682,7 @@ class Database:
                 if old != updated:
                     self._archive_recovery(db, "revision", auction, [old])
                     self.put(db, "lot", key, updated)
+                self._queue_photos(db, auction, updated)
                 self._set_output(db, auction, lot)
                 return updated
             if op == "import_lots":
@@ -651,6 +717,8 @@ class Database:
                 self._archive_recovery(
                     db, "auction" if numbers is None else "lots", auction, selected
                 )
+                for record in selected:
+                    self._queue_photos(db, auction, {**record, "photos": []})
                 if numbers is None:
                     db.execute(
                         "DELETE FROM records WHERE kind='auction' AND key=?",

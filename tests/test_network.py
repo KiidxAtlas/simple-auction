@@ -166,6 +166,117 @@ def test_synced_photo_names_follow_lot_order_without_changing_open_drafts(
     assert reopened.photos[0].read_bytes() == before[0]
 
 
+def test_shared_saves_publish_ordered_photos_in_auction_folder(
+    clients, config, host, tmp_path
+):
+    client = clients[0]
+    original = record(client)
+    sources = []
+    for color in ("red", "blue"):
+        source = tmp_path / f"{color}.png"
+        Image.new("RGB", (160, 120), color).save(source)
+        sources.append(source)
+    originals = [source.read_bytes() for source in sources]
+    lot = client.materialize(original)
+    lot.photos = sources
+    saved = client.save_lot(41000, lot, original)
+    folder = config.auction_photos_dir(41000)
+    expected = [host.db.asset(digest).read_bytes() for digest in saved["photos"]]
+    assert (folder / "41000.jpg").read_bytes() == expected[0]
+    assert (folder / "41000-1.jpg").read_bytes() == expected[1]
+
+    other = client.request("new_lot", auction=41000, step=config.step)
+    other_lot = client.materialize(other)
+    other_lot.photos = [sources[0]]
+    client.save_lot(41000, other_lot, other)
+    neighbor = folder / f"{other_lot.lot_number}.jpg"
+    neighbor_bytes = neighbor.read_bytes()
+
+    reordered = client.materialize(saved)
+    reordered.photos.reverse()
+    updated = client.save_lot(41000, reordered, saved)
+    assert (folder / "41000.jpg").read_bytes() == expected[1]
+    assert (folder / "41000-1.jpg").read_bytes() == expected[0]
+    reordered.photos = reordered.photos[1:]
+    client.save_lot(41000, reordered, updated)
+    assert (folder / "41000.jpg").read_bytes() == expected[0]
+    assert not (folder / "41000-1.jpg").exists()
+    assert neighbor.read_bytes() == neighbor_bytes
+    assert [source.read_bytes() for source in sources] == originals
+
+    current = client.snapshot()["auctions"]["41000"]
+    client.request("delete", auction=41000, numbers=[41000], expected=current)
+    assert not (folder / "41000.jpg").exists()
+    assert neighbor.read_bytes() == neighbor_bytes
+    entry = next(
+        entry for entry in client.request("recovery_list") if entry["kind"] == "lots"
+    )
+    client.request("recovery_restore", id=entry["id"])
+    assert (folder / "41000.jpg").read_bytes() == expected[0]
+    assert all(host.db.asset(digest).is_file() for digest in saved["photos"])
+
+
+def test_opening_shared_database_publishes_existing_unopened_lots(config):
+    from simple_auction.services import image
+
+    db = network.Database(config)
+    digests = [
+        db.store_photo(image.conform(Image.new("RGB", (160, 120), color)))
+        for color in ("red", "blue")
+    ]
+    # Model an older shared catalogue: assets and records, no public copies.
+    with db.transaction() as conn:
+        for lot, digest in zip((41000, 41001), digests):
+            db.put(
+                conn,
+                "lot",
+                f"41000/{lot}",
+                {**network.lot_data(Lot(lot)), "photos": [digest]},
+            )
+    folder = config.auction_photos_dir(41000)
+    assert not folder.exists()
+    network.Database(config)
+    for lot, digest in zip((41000, 41001), digests):
+        assert (folder / f"{lot}.jpg").read_bytes() == db.asset(digest).read_bytes()
+    (folder / "41001.jpg").write_bytes(b"stale copy")
+    network.Database(config)
+    assert (folder / "41001.jpg").read_bytes() == db.asset(digests[1]).read_bytes()
+
+
+def test_failed_photo_folder_update_keeps_shared_data_and_resumes_on_restart(
+    clients, config, host, tmp_path, monkeypatch
+):
+    client = clients[0]
+    original = record(client)
+    source = tmp_path / "red.png"
+    Image.new("RGB", (160, 120), "red").save(source)
+    lot = client.materialize(original)
+    lot.photos = [source]
+    folder = config.auction_photos_dir(41000)
+
+    def disk_full(*args, **kwargs):
+        raise OSError("disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(network.storage, "commit", disk_full)
+        with pytest.raises(network.NetworkError, match="catalogue was saved"):
+            client.save_lot(41000, lot, original)
+    with host.db.connect() as conn:
+        saved = host.db.get(conn, "lot", "41000/41000")
+    expected = host.db.asset(saved["photos"][0]).read_bytes()
+    network.Database(config)
+    assert (folder / "41000.jpg").read_bytes() == expected
+
+    with monkeypatch.context() as patch:
+        patch.setattr(network.storage, "commit", disk_full)
+        with pytest.raises(network.NetworkError, match="catalogue was saved"):
+            client.request("delete", auction=41000, numbers=None, expected=[saved])
+    assert (folder / "41000.jpg").read_bytes() == expected
+    network.Database(config)
+    assert not (folder / "41000.jpg").exists()
+    assert host.db.asset(saved["photos"][0]).read_bytes() == expected
+
+
 def test_photos_transfer_and_removal_are_version_checked(clients, tmp_path, host):
     a, b = clients
     src = tmp_path / "new.png"

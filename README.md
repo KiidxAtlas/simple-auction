@@ -34,11 +34,15 @@ Return to open or close an auction). On narrow windows the editor reflows into o
 column instead of cutting fields off.
 
 Saved imported photos use their lot number and photo order: `41001.jpg`,
-`41001-1.jpg`, `41001-2.jpg`, and so on. Shared photos use these same filenames
-when loaded after syncing, including photos cached by earlier versions. Reordering
-or removing photos updates the numbering on save. Shared cache copies are kept
-in separate photo-set folders so a sync cannot replace an open draft's photos;
-internal transfer files still use content hashes. Original import files are not renamed.
+`41001-1.jpg`, `41001-2.jpg`, and so on. The sharing host also maintains these
+copies in the configured Photos folder, under `auction 41000 photos`, for every
+saved lot—not just lots opened on that computer. Opening the host rebuilds
+missing or stale copies from existing shared records. Reordering, removing,
+deleting and restoring photos update these copies; a failed folder write keeps
+the shared originals and pending work for the next request or host restart.
+Joining computers keep separate, lot-numbered cache copies when a lot is opened,
+so a sync cannot replace an open draft's photos. Internal `.shared` files still
+use content hashes; do not rename or delete them. Original import files are not renamed.
 
 Press **Ctrl+D** (or **⋯ → Duplicate this lot**) to start a new lot from this lot's make,
 model, condition and consignment; **Ctrl+G** jumps to the search box, and Enter there

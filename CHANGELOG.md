@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.18 — 2026-10-27
+
+### Fixed
+
+- Shared photo saves now update the host's normal auction photo folders with
+  lot-numbered files, including changes made by joining computers. Opening the
+  host rebuilds these copies for existing shared lots without needing to open
+  each lot. Reordering, removal, deletion and recovery keep the folder current;
+  failed writes retain pending work and never remove the immutable shared originals.
+
+### Updating
+
+- Install this update on the sharing host and reopen the app to rebuild the
+  auction photo folders. Internal `.shared` files must not be renamed or deleted.
+
 ## 0.1.17 — 2026-10-27
 
 ### Changed
