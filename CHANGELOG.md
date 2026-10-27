@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.19 — 2026-10-27
+
+### Fixed
+
+- Local and shared auction CSV exports now contain only Lot Number, Title,
+  Description, Owner and Book Number, in that order. Serial and all other columns
+  are excluded; saved workbook data is unchanged.
+
 ## 0.1.18 — 2026-10-27
 
 ### Fixed

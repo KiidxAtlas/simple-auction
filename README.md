@@ -58,10 +58,11 @@ database opens). The Photos area shows each photo's size, rotates (left/right),
 previews at full size (double-click, arrow keys to move), and drag-to-reorder or
 **Make main photo** sets which photo is first.
 
-Auction workbooks and CSV exports use **Lot Number, Title, Description, Owner,
-Book Number, Serial, Condition, Year**, in that order. Older app workbooks still
-load correctly and are reordered when saved or exported; exporting does not
-rewrite the source workbook. Existing lot values and extra columns are retained.
+Auction workbooks use **Lot Number, Title, Description, Owner, Book Number,
+Serial, Condition, Year**, in that order. Older app workbooks still load correctly
+and are reordered when saved or exported. CSV exports include only **Lot Number,
+Title, Description, Owner, Book Number**, in that order; Serial, Condition, Year
+and all other columns are excluded. Exporting does not rewrite the source workbook.
 Exports are comma-separated UTF-8 files with a BOM for spreadsheet compatibility;
 workbook formatting and additional sheets are not part of the CSV.
 

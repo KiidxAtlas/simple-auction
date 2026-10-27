@@ -128,17 +128,13 @@ def test_legacy_load_export_and_save_preserve_fields_and_formatting(
     assert path.read_bytes() == original
     with exported.open(encoding="utf-8-sig", newline="") as stream:
         assert list(csv.reader(stream)) == [
-            [*EXPECTED_HEADERS, "Staff note"],
+            EXPECTED_HEADERS[:5],
             [
                 "41001",
                 "Rifle",
                 "Description text",
                 "Owner name",
                 "7",
-                "ABC",
-                "Good",
-                "1990" if include_year else "",
-                "Retain this extra column",
             ],
         ]
     excel.save_lot(path, lot)
@@ -182,6 +178,7 @@ def test_export_csv_content(tmp_path, shared, empty):
                 book_no="007",
                 serial="00123",
                 condition="Good",
+                year=1990,
             )
         ]
     )
@@ -193,11 +190,9 @@ def test_export_csv_content(tmp_path, shared, empty):
         excel.export_lots(lots, destination)
     else:
         excel.export_auction(source, destination)
-    expected = ",".join(EXPECTED_HEADERS) + "\r\n"
+    expected = ",".join(EXPECTED_HEADERS[:5]) + "\r\n"
     if not empty:
-        expected += (
-            '41001,"Café, ""special""","Line one\nLine two",Zoë,007,00123,Good,\r\n'
-        )
+        expected += '41001,"Café, ""special""","Line one\nLine two",Zoë,007\r\n'
     assert destination.read_bytes() == expected.encode("utf-8-sig")
     assert source.read_bytes() == original
 

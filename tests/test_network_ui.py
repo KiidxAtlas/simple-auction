@@ -106,6 +106,13 @@ def test_two_windows_share_create_edit_photos_and_csv(windows, tmp_path, monkeyp
     a.export_auction(a.auction_no)
     with output.open(encoding="utf-8-sig", newline="") as stream:
         lots = list(csv.DictReader(stream))
+    assert list(lots[0]) == [
+        "Lot Number",
+        "Title",
+        "Description",
+        "Owner",
+        "Book Number",
+    ]
     assert lots[0]["Owner"] == "Other person"
     assert lots[0]["Title"] == "Shared title"
 
@@ -133,6 +140,13 @@ def test_local_csv_export_and_cancel(app, tmp_path, monkeypatch, filename):
         if filename == "export.csv":
             with output.open(encoding="utf-8-sig", newline="") as stream:
                 lots = list(csv.DictReader(stream))
+            assert list(lots[0]) == [
+                "Lot Number",
+                "Title",
+                "Description",
+                "Owner",
+                "Book Number",
+            ]
             assert lots[0]["Title"] == 'Café, "special"'
             assert not errors
         elif output:

@@ -168,7 +168,7 @@ def delete_lots(path: Path, lot_numbers: set[int]) -> None:
 
 
 def export_auction(path: Path, destination: Path) -> None:
-    """Export the active sheet as CSV without editing the source workbook."""
+    """Export columns through Book Number as CSV without editing the source workbook."""
     with _edit_workbook(path) as wb:
         if not path.exists():
             raise FileNotFoundError(path)
@@ -182,7 +182,8 @@ def export_lots(lots: list[Lot], destination: Path) -> None:
 
 def _csv_data(rows) -> bytes:
     stream = io.StringIO(newline="")
-    csv.writer(stream).writerows(rows)
+    end = HEADERS.index("Book Number") + 1
+    csv.writer(stream).writerows(row[:end] for row in rows)
     return stream.getvalue().encode("utf-8-sig")
 
 
