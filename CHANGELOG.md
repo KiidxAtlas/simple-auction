@@ -2,35 +2,16 @@
 
 ## Unreleased
 
-### Added
-
-- Auction export now offers Proxibid CSV and Excel workbook formats for local
-  and shared catalogues, both containing the same five columns. Excel exports
-  store Book Number as literal Text to preserve leading zeros and long
-  identifiers. Both formats normalize embedded line breaks to keep each lot
-  on one physical line when used as CSV for Proxibid.
-
 ### Fixed
 
+- Running `python -m main` or `python main.py` from a source checkout now loads
+  that checkout's `src/simple_auction` package ahead of older installed copies.
+  PyInstaller builds continue to use their bundled package.
 - Excel exports now flatten line breaks inside all exported text cells, matching
   direct CSV exports. Converting an exported workbook to CSV no longer creates
   description-fragment rows that Proxibid treats as invalid or duplicate lots.
   Book Number remains Text, empty cells stay empty, and the original saved
   catalogue retains its multiline descriptions.
-- Local and shared auction CSV exports now contain only Lot Number, Title,
-  Description, Owner and Book Number, in that order. Serial and all other columns
-  are excluded; saved workbook data is unchanged.
-- Catalogue CSV exports now keep each lot on one physical line and omit worksheet
-  rows without lot numbers, avoiding description fragments and blank rows that
-  Proxibid Bulk Loader can treat as invalid or duplicate lots. Empty cells stay
-  empty with their column positions preserved, like Excel CSV exports; no
-  description placeholders are inserted. Original saved text and lot numbers
-  are unchanged.
-- Shared photo saves now update the host's normal auction photo folders with
-  lot-numbered files, including changes made by joining computers. Opening the
-  host rebuilds these copies for existing shared lots without needing to open
-  each lot. Reordering, removal, deletion and recovery keep the folder current;
-  failed writes retain pending work and never remove the immutable shared originals.
 - Auctions saved on a computer but missing from the shared catalogue are no
   longer hidden without notice. This covers a joining computer's own
   spreadsheets, and workbooks added after the host's one-time import. After

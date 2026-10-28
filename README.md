@@ -6,8 +6,14 @@ serial lookups and research. Optional local network sharing connects multiple co
 ## Run from source
 
 ```bash
-uv run simple-auction
+uv sync
+uv run python -m main
 ```
+
+`uv run simple-auction` is equivalent. The `main.py` launcher prefers this
+checkout's `src/` package over another installed copy. Plain `python -m main`
+also uses the checkout, but its Python interpreter must have the dependencies
+installed; `uv run` selects the project's managed environment.
 
 ## Appearance
 
