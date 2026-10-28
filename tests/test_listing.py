@@ -3,6 +3,7 @@ import pytest
 from simple_auction.models import Lot
 from simple_auction.services.conditions import (
     DEFAULT_CONDITIONS,
+    PREVIOUS_DEFAULT_CONDITIONS,
     ConditionOption,
     cleaned,
     from_json,
@@ -16,7 +17,7 @@ from simple_auction.services.listing import (
 )
 
 KNOWN = [o.name for o in DEFAULT_CONDITIONS]
-NOTE = {o.name: o.note for o in DEFAULT_CONDITIONS}
+NOTE = {o.name: o.note for o in PREVIOUS_DEFAULT_CONDITIONS}
 
 
 def test_title_suffix_added_and_replaced():
@@ -50,10 +51,10 @@ def test_desc_keeps_user_text_after_condition_line():
     )
 
 
-def test_condition_without_text_writes_just_the_name():
-    assert condition_desc("Blued.", "As Is", "", ["As Is"]) == (
-        "Blued.\n\nCondition: As Is."
-    )
+def test_condition_without_text_leaves_description_unchanged():
+    desc = "  Blued.\n\nCondition: Good. Existing wording.\n"
+    assert condition_desc(desc, "As Is", "", ["As Is", "Good"]) == desc
+    assert condition_desc(desc, "As Is", "   ", ["As Is", "Good"]) == desc
 
 
 def test_apply_condition_is_idempotent():
@@ -161,3 +162,14 @@ def test_custom_note_rewording_removes_only_known_previous_note():
         )
         == "Listing.\n\nCondition: Very Good+. Revised note. Includes case.\nKeep this paragraph."
     )
+
+
+@pytest.mark.parametrize("option", DEFAULT_CONDITIONS)
+def test_all_default_conditions_add_no_description_text(option):
+    assert option.note == ""
+    for description in ("", "  Existing text.\n\nCondition: Good. Old wording.\n"):
+        lot = Lot(1, title="Rifle", desc=description, condition=option.name)
+        out = apply_condition(lot, DEFAULT_CONDITIONS)
+        assert out.condition == option.name
+        assert out.desc == description
+        assert out.title == f"Rifle - {option.name}"

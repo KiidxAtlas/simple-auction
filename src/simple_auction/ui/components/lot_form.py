@@ -587,7 +587,7 @@ class LotForm(QWidget):
 
         # Listing: title first, then condition and CA legality side by side.
         self.condition = QComboBox()
-        self.condition.setPlaceholderText(strings.PICK_CONDITION)
+        self.condition.setItemDelegate(_BlankAsNone(self.condition))
         self.condition.activated.connect(
             lambda _index: self._apply_condition(restore=True)
         )
@@ -912,6 +912,16 @@ class LotForm(QWidget):
         # changes.
         self._apply_condition()
 
+    def renumber(self, lot_number: int, auction_no: int) -> None:
+        """Show the number the host gave a lot created offline, keeping edits."""
+        assert self._lot is not None
+        self._lot = replace(self._lot, lot_number=lot_number)
+        self._auction_no = auction_no
+        self.subtitle.setText(
+            strings.LOT_BREADCRUMB.format(auction=auction_no, lot=lot_number)
+        )
+        self.export_action.setText(strings.EXPORT_AUCTION_N.format(n=auction_no))
+
     def current_lot(self) -> Lot | None:
         """The lot as currently shown in the fields, or None if none is open."""
         return self.collect() if self._lot is not None else None
@@ -1113,9 +1123,8 @@ class LotForm(QWidget):
         return [o.name for o in self._conditions] + [self._applied_condition]
 
     def _fill_conditions(self, current: str) -> None:
-        """Put the configured conditions in the dropdown and select `current`.
-        A condition no longer in Settings is kept as an extra choice."""
-        names = [o.name for o in self._conditions]
+        """Keep a blank default and preserve saved conditions, including old names."""
+        names = ["", *(o.name for o in self._conditions)]
         self.condition.blockSignals(True)
         self.condition.clear()
         self.condition.addItems(names)
@@ -1123,7 +1132,7 @@ class LotForm(QWidget):
         if current and match is None:
             self.condition.addItem(current)
             match = current
-        self.condition.setCurrentIndex(self.condition.findText(match) if match else -1)
+        self.condition.setCurrentIndex(self.condition.findText(match or ""))
         self.condition.blockSignals(False)
 
     def _mark_dirty(self, *, invalidate_review: bool = True) -> None:

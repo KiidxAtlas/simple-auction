@@ -4,13 +4,14 @@ import io
 import json
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from datetime import datetime
 from uuid import uuid4
 
 import pytest
 from PIL import Image
 
 from simple_auction.models import Lot
-from simple_auction.services import catalogue, excel, network, shipping
+from simple_auction.services import catalogue, excel, network, output, shipping
 from simple_auction.services.config import Config
 from simple_auction.services.importer import Sheet
 
@@ -398,8 +399,22 @@ def test_pairing_identity_disconnect_and_input_boundaries(host, clients):
     host.close()
     # Prevent the fixture from stopping the same host twice.
     host.close = lambda: None
-    with pytest.raises(network.NetworkError, match="unavailable"):
-        clients[0].snapshot()
+    # Without a copy on this computer there is nothing to work from.
+    stranger = network.Client(
+        f"127.0.0.1:{host.port}",
+        host.code,
+        identity=host.db.identity,
+        cache=clients[0].cache.parent / "never-connected",
+    )
+    with pytest.raises(network.Unavailable, match="unavailable"):
+        stranger.snapshot()
+    # A client that connected before keeps working from its saved copy.
+    snapshot = clients[0].snapshot()
+    assert clients[0].offline
+    assert snapshot["identity"] == host.db.identity
+    assert "41000" in snapshot["auctions"]
+    with pytest.raises(network.Unavailable, match="Not connected to the host"):
+        clients[0].request("recovery_list")
 
 
 def test_udp_find_host_without_exposing_pairing_code(config):
@@ -533,3 +548,166 @@ def test_oversized_shared_photos_are_fixed_when_the_database_opens(config):
     again = network.Database(config)  # a second pass changes nothing
     with again.transaction() as conn:
         assert again.get(conn, "lot", key)["photos"] == [first, second]
+
+
+def lots_of(client, auction):
+    return {v["lot_number"]: v for v in client.snapshot()["auctions"][str(auction)]}
+
+
+def test_offline_edits_are_kept_and_sync_through_host_checks(
+    config, host, clients, tmp_path
+):
+    a, b = clients
+    photo = tmp_path / "offline.png"
+    Image.new("RGB", (160, 120), "green").save(photo)
+    a.offline = True  # the host is out of reach
+    original = record(a)
+    lot = a.materialize(original)
+    lot.title, lot.photos = "Edited offline", [photo]
+    saved = a.commit_lot(41000, lot, original)
+    assert saved["title"] == "Edited offline" and len(saved["photos"]) == 1
+    created = a.new_lot(41000, config.step)
+    assert created["lot_number"] == 41001
+    auction = a.new_auction(config.step)
+    first = a.new_lot(auction, config.step)
+    first_lot = a.materialize(first)
+    first_lot.title = "In a new auction"
+    a.commit_lot(auction, first_lot, first)
+    # Browsing offline shows the queued edits, photos included.
+    view = a.snapshot()
+    assert view["pending"] == 5
+    assert lots_of(a, 41000)[41000]["title"] == "Edited offline"
+    assert a.materialize(lots_of(a, 41000)[41000]).photos[0].is_file()
+    assert lots_of(a, auction)[first["lot_number"]]["title"] == "In a new auction"
+    # A restarted app reads the same queue from disk.
+    restarted = network.Client(a.address, a.code, identity=a.identity, cache=a.cache)
+    restarted.offline = True
+    assert restarted.snapshot() == view
+
+    # Meanwhile, others took the numbers this computer picked.
+    taken_lot = b.request("new_lot", auction=41000)["lot_number"]
+    taken_auction = b.request("new_auction")
+    assert (taken_lot, taken_auction) == (41001, auction)
+
+    a.offline = False
+    result = a.sync()
+    assert result["conflicts"] == []
+    assert result["synced"] == 5
+    new_auction = result["auctions"][auction]
+    assert new_auction != auction
+    assert result["lots"][(41000, 41001)] == (41000, 41002)
+    assert result["lots"][(auction, first["lot_number"])] == (new_auction, new_auction)
+    host_lots = lots_of(b, 41000)
+    assert host_lots[41000]["title"] == "Edited offline"
+    assert b.materialize(host_lots[41000]).photos[0].read_bytes()
+    assert set(host_lots) == {41000, 41001, 41002}
+    assert lots_of(b, new_auction)[new_auction]["title"] == "In a new auction"
+    assert lots_of(b, taken_auction) == {}  # the other computer's auction untouched
+    assert a.pending() == 0 and a.sync()["synced"] == 0
+
+
+def test_output_counted_offline_syncs_under_the_numbers_the_host_assigned(
+    config, host, clients, tmp_path
+):
+    a, b = clients
+    log = output.OutputLog(tmp_path / "output.json")
+    a.history = log.rows
+    earlier = datetime(2026, 1, 2, 10, 0).astimezone()
+    a.offline = True
+    created = a.new_lot(41000, config.step)
+    lot = a.materialize(created)
+    lot.title, lot.condition, lot.make = "Filled offline", "Good", "Maker"
+    a.commit_lot(41000, lot, created)
+    log.track(lot, 41000, now=earlier)
+    assert log.count_on(earlier.date()) == 1  # counted while offline
+
+    # Another computer takes 41001 and fills it in meanwhile.
+    theirs = b.request("new_lot", auction=41000)
+    filled = b.materialize(theirs)
+    filled.title, filled.condition, filled.make = "Theirs", "Fair", "Other"
+    b.save_lot(41000, filled, theirs)
+
+    a.offline = False
+    probe = a.snapshot()
+    assert probe["pending"] == 2  # history waits for the queued edits
+    assert a.sync()["lots"][(41000, 41001)] == (41000, 41002)
+    synced = a.snapshot()
+    assert "pending" not in synced
+    info = {(r["auction"], r["lot"]): r["at"] for r in synced["output"]["info"]}
+    # Kept with the day it was counted, under the host's number, and never
+    # credited to the other computer's lot that had the offline number.
+    assert datetime.fromisoformat(info[(41000, 41002)]) == earlier
+    assert datetime.fromisoformat(info[(41000, 41001)]) != earlier
+    assert not (a.store().folder / "history-renumbered.json").exists()
+
+
+def test_offline_edit_refused_on_host_is_kept_and_does_not_block_queue(
+    config, host, clients
+):
+    a, b = clients
+    original = record(a)
+    a.offline = True
+    mine = a.materialize(original)
+    mine.title = "Mine"
+    a.commit_lot(41000, mine, original)
+    a.new_lot(41000, config.step)
+    theirs = b.materialize(original)
+    theirs.title = "Theirs"
+    b.save_lot(41000, theirs, original)
+    a.offline = False
+    result = a.sync()
+    assert record(b)["title"] == "Theirs"  # never overwritten
+    [kept] = result["conflicts"]
+    edit = json.loads((kept / "edit.json").read_text())
+    assert edit["lot"]["title"] == "Mine" and "Someone else changed" in edit["error"]
+    assert 41001 in lots_of(b, 41000)  # later edits still synced
+    assert a.pending() == 0
+
+
+def test_replayed_creation_after_lost_response_is_not_duplicated(host, clients):
+    a, _ = clients
+    first = a.request("new_lot", auction=41000, number=41005, request="lost-1")
+    again = a.request("new_lot", auction=41000, number=41005, request="lost-1")
+    assert first == again and first["lot_number"] == 41005
+    assert sorted(lots_of(a, 41000)) == [41000, 41005]
+    auction = a.request("new_auction", number=50000, request="lost-2")
+    assert a.request("new_auction", number=50000, request="lost-2") == auction == 50000
+    assert list(a.snapshot()["auctions"]).count("50000") == 1
+    with pytest.raises(network.NetworkError):
+        a.request("new_lot", auction=41000, request="../bad")
+
+
+def test_local_auctions_missing_from_shared_catalogue_are_found_and_copied(
+    config, host, clients
+):
+    from simple_auction.services.lot_details import details_path
+
+    a, _ = clients
+    # Workbooks made after the one-time import, or a joining computer's own.
+    for auction in (52000, 53000):
+        path = excel.auction_path(config.auctions_dir, auction)
+        excel.create_auction(path)
+        catalogue.add(
+            path,
+            details_path(config.data_dir, auction),
+            [Lot(auction, title=f"Local {auction}")],
+        )
+    photos = config.auction_photos_dir(52000)
+    photos.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (160, 120), "blue").save(photos / "52000.jpg")
+    assert set(network.unshared_auctions(config, a.snapshot())) == {52000, 53000}
+    # An auction deleted from the shared catalogue after its workbook last
+    # changed stays deleted.
+    a.request("import_lots", auction=53000, lots=[])
+    expected = a.snapshot()["auctions"]["53000"]
+    a.request("delete", auction=53000, expected=expected, numbers=None)
+    deletions = a.request("recovery_list")
+    found = network.unshared_auctions(config, a.snapshot(), deletions)
+    assert set(found) == {52000}
+
+    assert network.copy_local_auction(a, config, 52000) == 1
+    [copied] = a.snapshot()["auctions"]["52000"]
+    assert copied["title"] == "Local 52000" and len(copied["photos"]) == 1
+    assert network.unshared_auctions(config, a.snapshot(), deletions) == {}
+    # Copying again leaves the shared version alone.
+    assert network.copy_local_auction(a, config, 52000) == 0

@@ -225,8 +225,8 @@ class Config:
     def load_conditions(self, legacy: object = None) -> str | None:
         """Read data/conditions.yaml into `conditions`.
 
-        Missing files use the current list or migrated legacy settings. The
-        exact old four-condition starter list is upgraded to today's defaults,
+        Missing files use the current list or migrated legacy settings.
+        Exact unmodified starter lists are upgraded to today's empty-note defaults,
         including in existing YAML files; custom lists are preserved. Unreadable
         files are left untouched and the problem is returned as a message.
         """
@@ -237,13 +237,19 @@ class Config:
             except ConditionsFileError as e:
                 log.warning("%s", e)
                 return str(e)
-            if self.conditions == conditions.LEGACY_DEFAULT_CONDITIONS:
+            if self.conditions in (
+                conditions.LEGACY_DEFAULT_CONDITIONS,
+                conditions.PREVIOUS_DEFAULT_CONDITIONS,
+            ):
                 self.conditions = list(conditions.DEFAULT_CONDITIONS)
                 self.save_conditions()
             return None
         if legacy is not None:
             self.conditions = conditions.from_json(legacy)
-        if self.conditions == conditions.LEGACY_DEFAULT_CONDITIONS:
+        if self.conditions in (
+            conditions.LEGACY_DEFAULT_CONDITIONS,
+            conditions.PREVIOUS_DEFAULT_CONDITIONS,
+        ):
             self.conditions = list(conditions.DEFAULT_CONDITIONS)
         self.save_conditions()
         return None

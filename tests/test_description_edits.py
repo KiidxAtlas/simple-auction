@@ -117,6 +117,11 @@ def test_names_capitalize_on_finish_and_autosave_before_focus_changes(window):
 @pytest.mark.parametrize("condition", ["Good", "Excellent"])
 def test_explicit_condition_selection_restores_deleted_wording(window, condition):
     form = window.form
+    from simple_auction.services.conditions import ConditionOption
+
+    form.set_conditions(
+        [ConditionOption(name, "Configured note.") for name in ("Good", "Excellent")]
+    )
     form.make.setText("Remington")
     form.condition.setCurrentText("Good")
     form._apply_title_fields()

@@ -44,8 +44,8 @@ DEFAULT_FIELDS = (
 # upgraded to DEFAULT_FIELDS (see Config).
 LEGACY_DEFAULT_FIELDS = ("make", "model", "serial", "title", "condition")
 PREVIOUS_DEFAULT_FIELDS = DEFAULT_FIELDS[:-1]  # before C&R was added
-# Description lines; the condition sentence is always added at the end
-# separately (see listing.condition_desc), so it isn't one of these.
+# Optional configured condition notes are added at the end separately
+# (see listing.condition_desc), so condition isn't one of these fields.
 DEFAULT_DESC_FIELDS = ("caliber", "gun_type", "barrel_length")
 # The earlier built-in default; a saved layout that's exactly this is
 # upgraded to DEFAULT_DESC_FIELDS (see Config).

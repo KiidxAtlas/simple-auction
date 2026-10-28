@@ -213,7 +213,7 @@ SETTINGS_FOOTER_HINT = "Changes take effect when you click Save."
 SETTINGS_AUCTION_ABOUT = (
     "How new auctions are numbered and where serial numbers are looked up."
 )
-SETTINGS_CONDITIONS_ABOUT = "The choices in each lot's Condition dropdown and the sentence each one adds to the description."
+SETTINGS_CONDITIONS_ABOUT = "The choices in each lot's Condition dropdown and optional description wording. Empty notes add nothing."
 SETTINGS_LISTING_ABOUT = (
     "Choose which details go into each lot's title and description, put them "
     "in order, and add fields of your own."
@@ -268,7 +268,7 @@ CONDITION_NAME = "Name"
 CONDITION_NAME_HINT = "e.g. Very good"
 CONDITION_NOTE = "Text added to the description"
 CONDITION_NOTE_PLACEHOLDER = (
-    "The sentence added to a lot's description when this condition is picked."
+    "Optional wording added when this condition is picked. Leave empty to add nothing."
 )
 CONDITIONS_EMPTY = "Select a condition to edit it, or click Add condition."
 ADD_CONDITION = "Add condition"
@@ -363,6 +363,21 @@ TRASH_FAILED = "Couldn't move {name} to the Trash."
 EXCEL_LOCKED_TITLE = "Workbook can't be written"
 EXCEL_LOCKED_BODY = "The workbook couldn't be written. Close it in Excel if it's open, or check file and folder permissions, then try again."
 AUCTION_FULL_TITLE = "Auction full"
+
+# Working without the host
+OFFLINE_STATUS = (
+    "Offline · {pending} kept on this computer, syncs when the host is back"
+)
+OFFLINE_NOTHING_PENDING = "Offline · working from the last synced catalogue"
+SYNCED_STATUS = "Back online · {count} synced"
+SAVED_OFFLINE = "Saved on this computer · syncs when the host is back"
+SYNC_CONFLICTS_TITLE = "Some offline edits were not applied"
+SYNC_CONFLICTS_BODY = "Someone changed or deleted these lots on the host while you were offline, so your versions were not applied. They are kept with their photos in:\n\n{folders}"
+LOCAL_AUCTIONS_TITLE = "Auctions on this computer"
+LOCAL_AUCTIONS_BODY = "These auctions are saved on this computer but are not in the shared catalogue, so they are not shown:\n\n{auctions}\n\nCopy them, with their photos, to the shared catalogue? The spreadsheets on this computer are not changed."
+LOCAL_AUCTIONS_COPY = "Copy to Shared Catalogue"
+LOCAL_AUCTIONS_LATER = "Not Now"
+LOCAL_AUCTIONS_COPIED = "{count} copied to the shared catalogue"
 
 
 def count(n: int, word: str) -> str:

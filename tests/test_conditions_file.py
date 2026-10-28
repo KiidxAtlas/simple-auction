@@ -5,10 +5,12 @@ import pytest
 from simple_auction.services.conditions import (
     DEFAULT_CONDITIONS,
     LEGACY_DEFAULT_CONDITIONS,
+    PREVIOUS_DEFAULT_CONDITIONS,
     ConditionOption,
     ConditionsFileError,
     load_file,
     save_file,
+    to_json,
 )
 from simple_auction.services.config import Config
 
@@ -49,7 +51,7 @@ def test_save_then_load_round_trip_with_awkward_names(tmp_path):
     text = path.read_text()
     assert text.startswith("# Lot conditions")
     first = DEFAULT_CONDITIONS[0]
-    assert f"{first.name}: " in text.split("\n\n", 1)[1]  # one line per condition
+    assert f"{first.name}:\n" in text.split("\n\n", 1)[1]  # one line per condition
     assert "As Is:\n" in text and "null" not in text
     assert load_file(path) == options
 
@@ -131,9 +133,12 @@ def test_stock_legacy_settings_create_nine_condition_yaml(tmp_path):
     ]
 
 
-def test_existing_stock_yaml_is_upgraded_once(tmp_path):
+@pytest.mark.parametrize(
+    "old", [LEGACY_DEFAULT_CONDITIONS, PREVIOUS_DEFAULT_CONDITIONS]
+)
+def test_existing_stock_yaml_is_upgraded_once(tmp_path, old):
     config = Config(base_dir=tmp_path)
-    save_file(config.conditions_path, LEGACY_DEFAULT_CONDITIONS)
+    save_file(config.conditions_path, old)
     assert config.load_conditions() is None
     assert config.conditions == DEFAULT_CONDITIONS
     assert load_file(config.conditions_path) == DEFAULT_CONDITIONS
@@ -153,6 +158,11 @@ def test_existing_stock_yaml_is_upgraded_once(tmp_path):
             *LEGACY_DEFAULT_CONDITIONS[1:],
         ],
         list(reversed(LEGACY_DEFAULT_CONDITIONS)),
+        [
+            ConditionOption("Factory New", "My custom note."),
+            *PREVIOUS_DEFAULT_CONDITIONS[1:],
+        ],
+        list(reversed(PREVIOUS_DEFAULT_CONDITIONS)),
     ],
 )
 def test_custom_conditions_are_not_replaced_by_defaults(tmp_path, source, options):
@@ -210,3 +220,10 @@ def test_yaml_list_accepts_percent_note(tmp_path):
     path = tmp_path / "conditions.yaml"
     path.write_text("- name: Good\n  text: % original finish\n")
     assert load_file(path) == [ConditionOption("Good", "% original finish")]
+
+
+def test_previous_stock_settings_migrate_to_empty_notes(tmp_path):
+    config = Config(base_dir=tmp_path)
+    assert config.load_conditions(to_json(PREVIOUS_DEFAULT_CONDITIONS)) is None
+    assert config.conditions == DEFAULT_CONDITIONS
+    assert all(not option.note for option in load_file(config.conditions_path))

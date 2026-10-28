@@ -103,6 +103,9 @@ def test_description_after_condition_survives_edit_save_and_reopen(window, suffi
     window.create_auction()
     auction, number = window.auction_no, window.lot_no
     form = window.form
+    from simple_auction.services.conditions import ConditionOption
+
+    form.set_conditions([ConditionOption("Good", "Configured note.")])
     form.title.setText("First lot")
     form.condition.setCurrentText("Good")
     form._apply_condition()

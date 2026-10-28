@@ -1,5 +1,58 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Auction export now offers Proxibid CSV and Excel workbook formats for local
+  and shared catalogues, both containing the same five columns. Excel exports
+  store Book Number as literal Text to preserve leading zeros and long
+  identifiers. Both formats normalize embedded line breaks to keep each lot
+  on one physical line when used as CSV for Proxibid.
+
+### Fixed
+
+- Excel exports now flatten line breaks inside all exported text cells, matching
+  direct CSV exports. Converting an exported workbook to CSV no longer creates
+  description-fragment rows that Proxibid treats as invalid or duplicate lots.
+  Book Number remains Text, empty cells stay empty, and the original saved
+  catalogue retains its multiline descriptions.
+- Local and shared auction CSV exports now contain only Lot Number, Title,
+  Description, Owner and Book Number, in that order. Serial and all other columns
+  are excluded; saved workbook data is unchanged.
+- Catalogue CSV exports now keep each lot on one physical line and omit worksheet
+  rows without lot numbers, avoiding description fragments and blank rows that
+  Proxibid Bulk Loader can treat as invalid or duplicate lots. Empty cells stay
+  empty with their column positions preserved, like Excel CSV exports; no
+  description placeholders are inserted. Original saved text and lot numbers
+  are unchanged.
+- Shared photo saves now update the host's normal auction photo folders with
+  lot-numbered files, including changes made by joining computers. Opening the
+  host rebuilds these copies for existing shared lots without needing to open
+  each lot. Reordering, removal, deletion and recovery keep the folder current;
+  failed writes retain pending work and never remove the immutable shared originals.
+- Auctions saved on a computer but missing from the shared catalogue are no
+  longer hidden without notice. This covers a joining computer's own
+  spreadsheets, and workbooks added after the host's one-time import. After
+  connecting, the app offers to copy them, with photos, into the shared
+  catalogue. Spreadsheets are left unchanged. Auctions deleted from the shared
+  catalogue after their workbook last changed are not offered again. If you
+  decline, you are asked again only after that workbook changes.
+- A joining computer that can't reach the host no longer waits on a
+  reconnection screen that can't be cancelled. It opens immediately from the
+  last synced catalogue, and you can browse, edit and add lots and auctions as
+  usual. Edits are saved on this computer with their photos and sent in order
+  when the host is reachable again, through the host's usual conflict checks.
+  If someone else changed or deleted a lot in the meantime, your version is
+  kept in a recovery folder and you are told where it is; it never overwrites
+  theirs. New lots and auctions keep their numbers when those are still free.
+  Otherwise the host assigns the next free number and the open lot follows it.
+  Output (started and filled-in counts, and the Output page) also works
+  offline. What you count there is sent with your edits when the host is back,
+  keeping the day it was counted and following lots that got a new number.
+  Deleting, importing, shipping, and recovery still need the host and say so
+  immediately.
+
 ## 0.1.21 — 2026-10-27
 
 ### Added

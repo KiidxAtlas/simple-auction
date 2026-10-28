@@ -20,7 +20,7 @@ import time
 from collections import deque
 from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -37,6 +37,7 @@ from simple_auction.services import (
     image,
     lot_details,
     numbering,
+    offline,
     output,
     recovery,
     shipping,
@@ -50,6 +51,9 @@ MAX_BODY = 64 * 1024 * 1024
 PHOTO_LIMIT = 40
 
 log = logging.getLogger(__name__)
+
+OFFLINE = "Not connected to the host. This needs the host computer; catalogue edits are kept on this computer and sync automatically once it is reachable."
+NO_OFFLINE_COPY = "Not connected to the host yet. Connect once on the same network to keep a copy for working offline."
 
 
 class NetworkError(shipping.ShippingError):
@@ -627,30 +631,26 @@ class Database:
                 return auction
             if op == "photo":
                 return base64.b64encode(self.asset(args["hash"]).read_bytes()).decode()
-            if op == "new_auction":
-                auctions = [
-                    int(k)
-                    for (k,) in db.execute(
-                        "SELECT key FROM records WHERE kind='auction'"
-                    )
-                ]
-                auction = numbering.next_auction(
-                    auctions, self.config.step, self.config.start_at
-                )
-                self.put(db, "auction", auction, {"number": auction})
-                return auction
-            if op == "new_lot":
-                auction = number(args["auction"])
-                if self.get(db, "auction", auction) is None:
-                    raise Conflict("This auction was deleted. Refresh the catalogue.")
-                lots = [
-                    Lot(v["lot_number"])
-                    for v in self.snapshot(db)["auctions"][str(auction)]
-                ]
-                lot = Lot(numbering.next_lot(lots, auction, self.config.step))
-                data = {**lot_data(lot), "photos": []}
-                self.put(db, "lot", f"{auction}/{lot.lot_number}", data)
-                return data
+            if op in {"new_auction", "new_lot"}:
+                # Offline edits are replayed with a request identity: a retry
+                # after a lost response returns the same record instead of
+                # creating a duplicate.
+                request = args.get("request")
+                if request is None:
+                    return self._create(db, op, args)
+                if not isinstance(request, str) or not re.fullmatch(
+                    r"[A-Za-z0-9-]{1,80}", request
+                ):
+                    raise ValueError("Invalid request identity")
+                key = f"request:{request}"
+                row = db.execute(
+                    "SELECT value FROM meta WHERE key=?", (key,)
+                ).fetchone()
+                if row:
+                    return json.loads(row[0])
+                result = self._create(db, op, args)
+                db.execute("INSERT INTO meta VALUES (?,?)", (key, json.dumps(result)))
+                return result
             if op == "save_lot":
                 auction = number(args["auction"])
                 lot = validated_lot(args["lot"])
@@ -661,7 +661,14 @@ class Database:
                 photos = args["photos"]
                 if not isinstance(photos, list) or len(photos) > PHOTO_LIMIT:
                     raise ValueError("Too many photos")
-                hashes = []
+                hashes = [photo["hash"] for photo in photos]
+                updated = {**lot_data(lot), "photos": hashes}
+                # Check for a conflicting edit first: a replayed offline edit
+                # may refer to photos of an earlier edit the host refused.
+                if old != args["expected"] and old != updated:
+                    raise Conflict(
+                        "Someone else changed this lot. Your edits have been kept; reload the lot before saving again."
+                    )
                 for photo in photos:
                     digest = photo["hash"]
                     path = self.asset(digest)
@@ -673,12 +680,6 @@ class Database:
                             )
                     elif not path.is_file():
                         raise ValueError("Photo is missing from the host")
-                    hashes.append(digest)
-                updated = {**lot_data(lot), "photos": hashes}
-                if old != args["expected"] and old != updated:
-                    raise Conflict(
-                        "Someone else changed this lot. Your edits have been kept; reload the lot before saving again."
-                    )
                 if old != updated:
                     self._archive_recovery(db, "revision", auction, [old])
                     self.put(db, "lot", key, updated)
@@ -872,6 +873,46 @@ class Database:
                     raise ValueError("This export is not available on this host")
                 return base64.b64encode(row[0]).decode()
             raise ValueError("Unknown sharing operation")
+
+    def _create(self, db, op, args):
+        """Allocate a new auction or lot. A number chosen while offline is kept
+        when it is still free; otherwise the host assigns the next one."""
+        requested = args.get("number")
+        if requested is not None:
+            number(requested)
+        if op == "new_auction":
+            if requested is not None and self.get(db, "auction", requested) is None:
+                auction = requested
+            else:
+                auctions = [
+                    int(k)
+                    for (k,) in db.execute(
+                        "SELECT key FROM records WHERE kind='auction'"
+                    )
+                ]
+                auction = numbering.next_auction(
+                    auctions, self.config.step, self.config.start_at
+                )
+            self.put(db, "auction", auction, {"number": auction})
+            return auction
+        auction = number(args["auction"])
+        if self.get(db, "auction", auction) is None:
+            raise Conflict("This auction was deleted. Refresh the catalogue.")
+        if (
+            requested is not None
+            and auction <= requested < auction + self.config.step
+            and self.get(db, "lot", f"{auction}/{requested}") is None
+        ):
+            lot = Lot(requested)
+        else:
+            lots = [
+                Lot(v["lot_number"])
+                for v in self.snapshot(db)["auctions"][str(auction)]
+            ]
+            lot = Lot(numbering.next_lot(lots, auction, self.config.step))
+        data = {**lot_data(lot), "photos": []}
+        self.put(db, "lot", f"{auction}/{lot.lot_number}", data)
+        return data
 
 
 class Host:
@@ -1076,12 +1117,20 @@ class Client:
         self.code = code
         self.identity = identity
         self.cache = cache or Path()
+        # Only a client given a cache folder keeps an offline copy; one-off
+        # clients (such as Settings' connection test) must not write one.
+        self._keeps_offline = cache is not None
         self.timeout = 12
         self._next_discovery = 0.0
+        # Set while the host is unreachable: work continues from the saved
+        # snapshot and the background poll reconnects, without blocking.
+        self.offline = False
         # Returns this computer's own history to merge on the next snapshot.
         self.history = history
 
     def request(self, op, **args):
+        if self.offline:
+            raise Unavailable(OFFLINE)
         raw = json.dumps(
             {"op": op, "args": args, "identity": self.identity}, allow_nan=False
         ).encode()
@@ -1122,11 +1171,42 @@ class Client:
             raise NetworkError("The host sent an invalid response") from e
 
     def _upload(self):
-        return {"output": self.history()} if self.history else {}
+        """This computer's output history, if it can be merged now. While
+        edits made offline wait to be sent, it may name lots by numbers the
+        host is about to change, so it waits as well (and the host's answer
+        carries `pending`, telling the window not to adopt it)."""
+        if not self.history:
+            return {}, None
+        store = self.store()
+        if store is None:
+            return {"output": self.history()}, None
+        if store.pending():
+            return {}, None
+        numbers = store.history_numbers()
+        rows = self.history()
+        if numbers["auctions"] or numbers["lots"]:
+            rows = offline.renumber_history(rows, numbers)
+            return {"output": rows}, store
+        return {"output": rows}, None
 
     def snapshot(self):
+        """The host's catalogue, or the copy kept on this computer while the
+        host is unreachable (then `offline` is set until a poll reconnects)."""
+        if self.offline:
+            return self._offline_view()
         try:
-            result = self.request("snapshot", **self._upload())
+            return self._fetch()
+        except Unavailable:
+            store = self.store()
+            if store is None or store.cached() is None:
+                raise
+            self.offline = True
+            return self._offline_view()
+
+    def _fetch(self):
+        upload, renumbered = self._upload()
+        try:
+            result = self.request("snapshot", **upload)
         except NetworkError:
             # Reboots can change DHCP addresses. Only reconnect to the saved
             # database identity, then authenticate and verify before adopting it.
@@ -1147,7 +1227,7 @@ class Client:
                 )
                 candidate.timeout = self.timeout
                 try:
-                    result = candidate.request("snapshot", **self._upload())
+                    result = candidate.request("snapshot", **upload)
                 except Unavailable:
                     continue
                 if result["identity"] != self.identity:
@@ -1161,7 +1241,229 @@ class Client:
         if self.identity and result["identity"] != self.identity:
             raise NetworkError("Host identity changed; pair again")
         self.identity = result["identity"]
+        if renumbered is not None:
+            renumbered.forget_history_numbers()
+        store = self.store()
+        if store is None:
+            return result
+        store.remember(result)
+        return offline.overlay(result, store.pending())
+
+    # -- working offline ----------------------------------------------------
+
+    def store(self):
+        """Saved snapshot and queued edits for this host, once it is known."""
+        if not self.identity or not self._keeps_offline:
+            return None
+        return offline.Store(self.cache / self.identity / "offline")
+
+    def _offline_view(self):
+        store = self.store()
+        view = store.view() if store else None
+        if view is None:
+            raise Unavailable(NO_OFFLINE_COPY)
+        return view
+
+    def pending(self):
+        store = self.store()
+        return len(store.pending()) if store else 0
+
+    def _direct(self):
+        """Send now, unless offline or older edits must reach the host first."""
+        store = self.store()
+        return store is None or (not self.offline and not store.pending())
+
+    def commit_lot(self, auction, lot, expected):
+        """Save to the host, or queue the save on this computer while it is
+        unreachable. Returns the record the host will hold."""
+        if self._direct():
+            try:
+                return self.save_lot(auction, lot, expected)
+            except Unavailable:
+                if self.store() is None:
+                    raise
+                # The host may still have committed it: replaying the same
+                # save is accepted as already applied.
+                self.offline = True
+        photos = []
+        for path in lot.photos:
+            raw, digest = self._photo_bytes(path, expected["photos"])
+            target = self._cached_photo(digest)
+            if (
+                not target.is_file()
+                or hashlib.sha256(target.read_bytes()).hexdigest() != digest
+            ):
+                storage.atomic_write(target, raw)
+            photos.append(digest)
+        if len(photos) > PHOTO_LIMIT:
+            raise NetworkError("Too many photos")
+        data = lot_data(validated_lot(lot_data(lot)))
+        updated = {**data, "photos": photos}
+        if updated != expected:
+            self.store().add(
+                {
+                    "op": "save_lot",
+                    "auction": number(auction),
+                    "lot": data,
+                    "photos": photos,
+                    "expected": expected,
+                }
+            )
+        return updated
+
+    def new_auction(self, step, start_at=None):
+        request = uuid4().hex
+        if self._direct():
+            try:
+                return self.request("new_auction", request=request)
+            except Unavailable:
+                if self.store() is None:
+                    raise
+                self.offline = True
+        view = self._offline_view()
+        auction = numbering.next_auction(
+            [int(a) for a in view["auctions"]], step, start_at
+        )
+        self.store().add({"op": "new_auction", "auction": auction, "request": request})
+        return auction
+
+    def new_lot(self, auction, step):
+        request = uuid4().hex
+        if self._direct():
+            try:
+                return self.request("new_lot", auction=auction, request=request)
+            except Unavailable:
+                if self.store() is None:
+                    raise
+                self.offline = True
+        lots = self._offline_view()["auctions"].get(str(auction))
+        if lots is None:
+            raise Conflict("This auction was deleted. Refresh the catalogue.")
+        lot = numbering.next_lot([Lot(v["lot_number"]) for v in lots], auction, step)
+        self.store().add(
+            {"op": "new_lot", "auction": auction, "lot": lot, "request": request}
+        )
+        return offline.empty_record(lot)
+
+    def sync(self):
+        """Replay edits made offline, oldest first, through the host's usual
+        checks. Returns the lot numbers the host assigned to lots created
+        offline and the edits it refused, which are kept on this computer."""
+        result = {"auctions": {}, "lots": {}, "conflicts": [], "synced": 0}
+        store = self.store()
+        if store is None:
+            return result
+        # Persisted, so an interrupted sync keeps renumbering later entries.
+        numbers = store.renumbered()
+        auctions, lots = numbers["auctions"], numbers["lots"]
+        while entries := store.pending():
+            path, entry = entries[0]
+            op, auction = entry["op"], entry["auction"]
+            request = entry.get("request", path.stem)
+            try:
+                if op == "new_auction":
+                    got = number(
+                        self.request("new_auction", number=auction, request=request)
+                    )
+                    if got != auction:
+                        auctions[auction] = got
+                else:
+                    n = entry["lot"] if op == "new_lot" else entry["lot"]["lot_number"]
+                    at, an = offline.moved(numbers, auction, n)
+                    if op == "new_lot":
+                        data = self.request(
+                            "new_lot", auction=at, number=an, request=request
+                        )
+                        if (at, data["lot_number"]) != (auction, n):
+                            lots[(auction, n)] = (at, data["lot_number"])
+                    else:
+                        expected = {**entry["expected"], "lot_number": an}
+                        self.request(
+                            "save_lot",
+                            auction=at,
+                            lot={**entry["lot"], "lot_number": an},
+                            photos=self._queued_photos(
+                                entry["photos"], expected["photos"]
+                            ),
+                            expected=expected,
+                        )
+            except Unavailable:
+                raise  # retried, in order, on the next poll
+            except NetworkError as e:
+                # Refused (changed or deleted on the host, auction full…).
+                # Keep it, with its photos, rather than block later edits.
+                result["conflicts"].append(
+                    store.keep_conflict(path, entry, str(e), self._cached_photo)
+                )
+            if auctions or lots:
+                store.save_renumbered(numbers)
+            store.remove(path)
+            result["synced"] += 1
+        result["auctions"], result["lots"] = dict(auctions), dict(lots)
+        store.finish_renumbering(numbers)
         return result
+
+    def prefetch(self, snapshot, limit=24):
+        """Download a few photos not yet on this computer, newest auctions
+        first, so lots can still be opened while the host is unreachable."""
+        fetched = 0
+        for auction in sorted(snapshot["auctions"], key=int, reverse=True):
+            for record in snapshot["auctions"][auction]:
+                for digest in record["photos"]:
+                    path = self._cached_photo(digest)
+                    if path.exists():
+                        continue
+                    self._download(digest, path)
+                    fetched += 1
+                    if fetched >= limit:
+                        return fetched
+        return fetched
+
+    def _cached_photo(self, digest):
+        if not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise NetworkError("Invalid shared photo identity")
+        return self.cache / self.identity / "photos" / (digest + ".jpg")
+
+    def _download(self, digest, path):
+        try:
+            raw = base64.b64decode(self.request("photo", hash=digest), validate=True)
+        except Unavailable:
+            if self.offline:
+                raise Unavailable(
+                    "This lot's photos have not been downloaded to this computer yet. Open it again once the host is reachable."
+                ) from None
+            raise
+        if hashlib.sha256(raw).hexdigest() != digest:
+            raise NetworkError("Downloaded photo is incomplete")
+        storage.atomic_write(path, raw)
+
+    def _queued_photos(self, hashes, known):
+        records = []
+        for digest in hashes:
+            record = {"hash": digest}
+            if digest not in known:
+                try:
+                    raw = self._cached_photo(digest).read_bytes()
+                except OSError:
+                    raw = b""
+                if hashlib.sha256(raw).hexdigest() != digest:
+                    raise Conflict(
+                        "A photo saved while offline is missing from this computer."
+                    )
+                record["data"] = base64.b64encode(raw).decode()
+            records.append(record)
+        return records
+
+    @staticmethod
+    def _photo_bytes(path, known):
+        raw = path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest not in known:
+            # Apply the existing photo processing for newly added images.
+            with Image.open(io.BytesIO(raw)) as img:
+                raw = image.conform(img)
+            digest = hashlib.sha256(raw).hexdigest()
+        return raw, digest
 
     def materialize(self, data):
         lot = validated_lot({k: v for k, v in data.items() if k != "photos"})
@@ -1172,19 +1474,12 @@ class Client:
         named_folder = folder / "lots" / str(lot.lot_number) / revision
         paths = []
         for index, digest in enumerate(data["photos"]):
-            if not re.fullmatch(r"[a-f0-9]{64}", digest):
-                raise NetworkError("Invalid shared photo identity")
-            path = folder / (digest + ".jpg")
+            path = self._cached_photo(digest)
             if (
                 not path.exists()
                 or hashlib.sha256(path.read_bytes()).hexdigest() != digest
             ):
-                raw = base64.b64decode(
-                    self.request("photo", hash=digest), validate=True
-                )
-                if hashlib.sha256(raw).hexdigest() != digest:
-                    raise NetworkError("Downloaded photo is incomplete")
-                storage.atomic_write(path, raw)
+                self._download(digest, path)
             named = named_folder / f"{image.image_name(lot.lot_number, index)}.jpg"
             if (
                 not named.exists()
@@ -1198,13 +1493,7 @@ class Client:
     def save_lot(self, auction, lot, expected):
         photos = []
         for path in lot.photos:
-            raw = path.read_bytes()
-            digest = hashlib.sha256(raw).hexdigest()
-            if digest not in expected["photos"]:
-                # Apply the existing photo processing for newly added images.
-                with Image.open(io.BytesIO(raw)) as img:
-                    raw = image.conform(img)
-                digest = hashlib.sha256(raw).hexdigest()
+            raw, digest = self._photo_bytes(path, expected["photos"])
             record = {"hash": digest}
             if digest not in expected["photos"]:
                 record["data"] = base64.b64encode(raw).decode()
@@ -1228,6 +1517,11 @@ class LocalClient(Client):
         self.history = None
         self.address = "local"
         self.code = ""
+        self.offline = False
+        self._next_discovery = float("inf")
+
+    def store(self):
+        return None  # The database is on this computer; nothing to queue.
 
     def request(self, op, **args):
         try:
@@ -1236,6 +1530,61 @@ class LocalClient(Client):
             raise
         except (OSError, ValueError, TypeError, sqlite3.Error) as e:
             raise NetworkError(str(e)) from e
+
+
+def unshared_auctions(config, snapshot, deletions=()):
+    """This computer's spreadsheet auctions missing from the shared catalogue.
+
+    Sharing shows only the shared database. Workbooks it never imported (a
+    joining computer's own auctions, or ones from before the one-time import)
+    stay on disk but out of sight. Auctions deleted from the shared catalogue
+    after their workbook last changed are not offered again.
+    """
+    deleted = {}
+    for entry in deletions:
+        if entry["kind"] == "auction":
+            at = datetime.fromisoformat(entry["created"])
+            deleted[entry["auction"]] = max(at, deleted.get(entry["auction"], at))
+    found = {}
+    for auction in excel.list_auctions(config.auctions_dir):
+        if str(auction) in snapshot["auctions"]:
+            continue
+        changed = max(
+            path.stat().st_mtime
+            for path in (
+                excel.auction_path(config.auctions_dir, auction),
+                lot_details.details_path(config.data_dir, auction),
+            )
+            if path.exists()
+        )
+        if auction in deleted and deleted[auction] >= datetime.fromtimestamp(
+            changed, UTC
+        ):
+            continue
+        found[auction] = changed
+    return found
+
+
+def copy_local_auction(client, config, auction):
+    """Add a spreadsheet auction, with photos, to the shared catalogue. Lots
+    already there are left as they are; the workbook is not changed."""
+    lots = catalogue.load(
+        excel.auction_path(config.auctions_dir, auction),
+        lot_details.details_path(config.data_dir, auction),
+    )
+    added = {
+        v["lot_number"]: v
+        for v in client.request(
+            "import_lots", auction=auction, lots=[lot_data(lot) for lot in lots]
+        )
+    }
+    for lot in lots:
+        lot.photos = image.lot_photo_files(
+            lot.lot_number, config.auction_photos_dir(auction)
+        )
+        if lot.lot_number in added and lot.photos:
+            client.save_lot(auction, lot, {**added[lot.lot_number], "photos": []})
+    return len(added)
 
 
 def local_addresses():

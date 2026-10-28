@@ -88,6 +88,8 @@ class MainPage(QMainWindow):
         self._shared_snapshot = None
         self._poll_worker = None
         self._sharing_signature = None
+        self._sync_results = []  # offline edits sent by a poll, not yet shown
+        self._local_offer = None  # connection already checked for local auctions
         self._closing = False
         self.auction_no: int | None = None
         self.lot_no: int | None = None
@@ -359,7 +361,7 @@ class MainPage(QMainWindow):
         """Rebuild the Output page from the history and the catalogue as saved."""
         today = output.today()
         try:
-            pipeline = kpi.pipeline(self._workflow_catalogue())
+            pipeline = kpi.pipeline(self._progress_catalogue())
         except OSError, ValueError, network.NetworkError, catalogue.CatalogueReadError:
             log.exception("Reading the catalogue for the Output page failed")
             pipeline = None
@@ -369,6 +371,26 @@ class MainPage(QMainWindow):
             today,
             kpi.report(self.output.started, today),
         )
+
+    def _progress_catalogue(self) -> dict[int, list[Lot]]:
+        """The catalogue for the Output page. Progress only counts photos, so
+        a shared catalogue is read without downloading them: it works from
+        the copy kept on this computer while the host is unreachable."""
+        if not self.shared:
+            return self._workflow_catalogue()
+        snapshot = self._io("Preparing catalogue review…", self._client().snapshot)
+        return {
+            int(auction): [
+                replace(
+                    network.validated_lot(
+                        {k: v for k, v in record.items() if k != "photos"}
+                    ),
+                    photos=[Path(digest) for digest in record["photos"]],
+                )
+                for record in records
+            ]
+            for auction, records in snapshot["auctions"].items()
+        }
 
     def _track_progress(self, auction_no: int, lot: Lot) -> None:
         """Count the lot's stages as they are saved now. Each lot counts once
@@ -399,6 +421,9 @@ class MainPage(QMainWindow):
     def _lots(self, auction_no: int) -> list[Lot]:
         if self.shared:
             snapshot = self._io("Loading shared auction…", self._client().snapshot)
+            if self.client.offline:
+                # Show that the host was unreachable and what is kept locally.
+                self._apply_snapshot(snapshot)
             self._shared_snapshot = snapshot
             return [
                 Lot(**{k: v for k, v in data.items() if k != "photos"})
@@ -594,6 +619,8 @@ class MainPage(QMainWindow):
             self.form.set_photos(photos)
         if unchanged:
             self.form.mark_saved()
+            if self.shared and self.client is not None and self.client.pending():
+                self.form.set_save_state("pending", strings.SAVED_OFFLINE)
         else:
             self._autosave.start(AUTOSAVE_MS)
         self.sidebar.update_lot(auction_no, lot)
@@ -753,7 +780,7 @@ class MainPage(QMainWindow):
             try:
                 auction_no = self._io(
                     "Creating shared auction…",
-                    lambda: self._client().request("new_auction"),
+                    lambda: self._client().new_auction(self.config.step),
                 )
                 self.create_lot(auction_no)
             except (network.NetworkError, ValueError) as e:
@@ -778,7 +805,7 @@ class MainPage(QMainWindow):
             try:
                 data = self._io(
                     "Creating shared lot…",
-                    lambda: self._client().request("new_lot", auction=auction_no),
+                    lambda: self._client().new_lot(auction_no, self.config.step),
                 )
                 lot = Lot(**{k: v for k, v in data.items() if k != "photos"})
                 self.refresh()
@@ -1333,7 +1360,8 @@ class MainPage(QMainWindow):
     def _save_shared_lot(self, auction, lot):
         if self._shared_base is None:
             raise network.NetworkError("Reload this lot from the host before editing")
-        updated = self._client().save_lot(auction, lot, self._shared_base)
+        # Sent now, or kept on this computer while the host is unreachable.
+        updated = self._client().commit_lot(auction, lot, self._shared_base)
         # The save response becomes the next baseline only after all downloads
         # succeed. Retrying an interrupted save is idempotent on the server.
         photos = self._client().materialize(updated).photos
@@ -1407,6 +1435,8 @@ class MainPage(QMainWindow):
             self.network_status.hide()
             self.reload_shared_button.hide()
             self._sharing_signature = signature
+            if self._shared_snapshot is not None:
+                self._offer_local_auctions(self._shared_snapshot)
             return
         try:
             settings.validate()
@@ -1429,7 +1459,14 @@ class MainPage(QMainWindow):
             )
             self.shipping.folder = self.config.data_dir / "shipping"
             self.shipping.set_connection(self.client, True)
-            snapshot = self._io("Connecting to local host…", self.client.snapshot)
+            store = self.client.store() if settings.mode == "join" else None
+            if store is not None and store.cached() is not None:
+                # Open from the copy on this computer; the background poll
+                # connects (or keeps retrying) without holding up the window.
+                self.client.offline = True
+                snapshot = self.client.snapshot()
+            else:
+                snapshot = self._io("Connecting to local host…", self.client.snapshot)
             self._apply_snapshot(snapshot)
             self._sharing_signature = self._connection_signature()
         except (
@@ -1475,9 +1512,18 @@ class MainPage(QMainWindow):
     def _apply_snapshot(self, snapshot, adopt_output=True):
         if self.client is not None and not self.client.identity:
             self.client.identity = snapshot["identity"]
-        self._remember_connection()
-        # Adopt only after this computer's history was uploaded (see _own_history).
-        if "output" in snapshot and adopt_output:
+        offline = self.client is not None and self.client.offline
+        if not offline:
+            self._remember_connection()
+        # Adopt only after this computer's history was uploaded (see
+        # _own_history). It waits while edits made offline are queued
+        # (`pending`), and a copy kept offline may predate local progress.
+        if (
+            "output" in snapshot
+            and adopt_output
+            and not offline
+            and not snapshot.get("pending")
+        ):
             self.output.adopt(snapshot["output"])
             self._update_counts()
         changed = (
@@ -1500,6 +1546,17 @@ class MainPage(QMainWindow):
                 self.sidebar.select(self.auction_no, self.lot_no)
             if self.pages.currentWidget() is self.output_page:
                 self.refresh_output()
+        if offline:
+            pending = snapshot.get("pending", 0)
+            self._net_status(
+                strings.OFFLINE_STATUS.format(pending=strings.count(pending, "edit"))
+                if pending
+                else strings.OFFLINE_NOTHING_PENDING
+            )
+            self.network_status.setToolTip(
+                "The host can't be reached. Browse, edit, and add lots and auctions as usual; they are kept on this computer and sent through the host's usual checks once it is reachable. Deleting, importing, shipping, and recovery need the host."
+            )
+            return
         state = (
             "Local"
             if isinstance(self.client, network.LocalClient)
@@ -1542,25 +1599,30 @@ class MainPage(QMainWindow):
         if worker is None:
             return
         try:
-            if (
-                self._closing
-                or worker.client is not self.client
-                or self._io_busy
-                or self.shipping.busy
-                or QApplication.activeModalWidget()
-            ):
+            if self._closing or worker.client is not self.client:
+                return
+            if worker.synced:
+                # The outbox is already sent: keep the host's numbering for
+                # the open lot even if it can't be shown right now.
+                self._sync_results.append(worker.synced)
+            if self._io_busy or self.shipping.busy or QApplication.activeModalWidget():
                 return
             if worker.connection is not None and not isinstance(
                 self.client, network.LocalClient
             ):
                 self.client._next_discovery = worker.connection._next_discovery
                 if worker.error is None:
+                    self.client.offline = worker.connection.offline
+                if worker.error is None and not worker.connection.offline:
                     self.client.address = worker.connection.address
                     self.client.identity = worker.connection.identity
             if worker.error:
+                if isinstance(worker.error, network.Unavailable):
+                    self.client.offline = self.client.store() is not None
                 self._net_status("Reconnecting automatically · edits kept")
                 self.network_status.setToolTip(str(worker.error))
                 return
+            renumbered = self._apply_sync_results()
             snapshot, batch, record, lot = worker.result
             # The poll uploads history only from a client that carries it.
             self._apply_snapshot(
@@ -1568,6 +1630,10 @@ class MainPage(QMainWindow):
                 adopt_output=worker.connection is not None
                 and worker.connection.history is not None,
             )
+            if self.client.offline or renumbered:
+                # A renumbered open lot is compared under its new number by
+                # the next poll.
+                return
             if (
                 not self.form.is_dirty()
                 and worker.current_key == (self.auction_no, self.lot_no)
@@ -1586,8 +1652,130 @@ class MainPage(QMainWindow):
                 self._net_status("Lot changed on host · your edits kept")
             if worker.shipping_key == self.shipping.path:
                 self.shipping.sync_snapshot(snapshot["shipping"], batch)
+            self._offer_local_auctions(snapshot)
         finally:
             worker.deleteLater()
+
+    def _apply_sync_results(self) -> bool:
+        """Follow edits made offline onto the host. Returns True if the open
+        lot was given a different number."""
+        results, self._sync_results = self._sync_results, []
+        moved = False
+        conflicts = []
+        for result in results:
+            conflicts += result["conflicts"]
+            key = (self.auction_no, self.lot_no)
+            if key in result["lots"]:
+                auction_no, lot_no = result["lots"][key]
+                self.auction_no, self.lot_no = auction_no, lot_no
+                self.form.renumber(lot_no, auction_no)
+                if self._shared_base is not None:
+                    self._shared_base = {**self._shared_base, "lot_number": lot_no}
+                moved = True
+        if results:
+            count = sum(r["synced"] for r in results)
+            self._status(
+                strings.SYNCED_STATUS.format(count=strings.count(count, "edit"))
+            )
+        if conflicts:
+            QMessageBox.warning(
+                self,
+                strings.SYNC_CONFLICTS_TITLE,
+                strings.SYNC_CONFLICTS_BODY.format(
+                    folders="\n".join(str(p) for p in conflicts)
+                ),
+            )
+        return moved
+
+    def _offer_local_auctions(self, snapshot) -> None:
+        """Offer once per connection to copy this computer's spreadsheet
+        auctions that the shared catalogue doesn't have (see
+        network.unshared_auctions). Declined ones are asked about again only
+        after their workbook changes."""
+        if (
+            self.client is None
+            or self.client.offline
+            or self._local_offer == self._sharing_signature
+        ):
+            return
+        self._local_offer = self._sharing_signature
+        import json
+
+        seen_path = self.config.data_dir / "shared-imports.json"
+        try:
+            seen = json.loads(seen_path.read_text()).get(self.client.identity, {})
+        except FileNotFoundError:
+            seen = {}
+        except OSError, ValueError, AttributeError:
+            log.warning("Ignoring unreadable %s", seen_path, exc_info=True)
+            seen = {}
+        try:
+            found = network.unshared_auctions(self.config, snapshot)
+            found = {a: t for a, t in found.items() if seen.get(str(a)) != t}
+            if not found:
+                return
+            deletions = self._io(
+                "Checking the shared catalogue…",
+                lambda: self.client.request("recovery_list"),
+            )
+            found = {
+                a: t
+                for a, t in network.unshared_auctions(
+                    self.config, snapshot, deletions
+                ).items()
+                if seen.get(str(a)) != t
+            }
+        except (OSError, network.NetworkError) as e:
+            log.warning("Could not check for unshared auctions: %s", e)
+            return
+        if not found:
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(strings.LOCAL_AUCTIONS_TITLE)
+        box.setText(
+            strings.LOCAL_AUCTIONS_BODY.format(
+                auctions="\n".join(f"Auction {a}" for a in sorted(found))
+            )
+        )
+        copy_button = box.addButton(
+            strings.LOCAL_AUCTIONS_COPY, QMessageBox.ButtonRole.AcceptRole
+        )
+        box.addButton(strings.LOCAL_AUCTIONS_LATER, QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is not copy_button:
+            try:
+                data = json.loads(seen_path.read_text()) if seen_path.exists() else {}
+                data.setdefault(self.client.identity, {}).update(
+                    {str(a): t for a, t in found.items()}
+                )
+                storage.atomic_write(seen_path, json.dumps(data, indent=2).encode())
+            except OSError, ValueError, AttributeError:
+                log.exception("Could not remember declined auctions")
+            return
+        client = self.client
+        try:
+            for auction in sorted(found):
+                self._io(
+                    f"Copying auction {auction}…",
+                    lambda a=auction: network.copy_local_auction(
+                        client, self.config, a
+                    ),
+                )
+        except (
+            OSError,
+            ValueError,
+            network.NetworkError,
+            catalogue.CatalogueReadError,
+        ) as e:
+            QMessageBox.warning(self, strings.LOCAL_AUCTIONS_TITLE, str(e))
+        else:
+            self._status(
+                strings.LOCAL_AUCTIONS_COPIED.format(
+                    count=strings.count(len(found), "auction")
+                )
+            )
+        self.refresh()
 
     def reload_shared(self):
         if self._io_busy or self.shipping.busy:

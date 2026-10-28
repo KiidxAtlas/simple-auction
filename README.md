@@ -18,7 +18,11 @@ the top right, beside the sharing status when sharing is on. Short confirmations
 In the catalogue, the sidebar has **New auction**, an import button for old Excel
 files, and a search box that filters lots by number or title. An amber dot marks
 lots still missing a title or condition; hover a lot to see its full title and
-what it needs. The lot editor shows the lot's title as its heading, with
+what it needs. New lots start with a blank Condition. All condition options have
+empty description notes by default, so even explicitly selecting a condition adds
+nothing to Description. Custom notes in Settings opt into description wording.
+The **None** choice leaves Condition blank. Saved values and description text are
+retained. The lot editor shows the lot's title as its heading, with
 ‹ › buttons (or Ctrl+Page Up/Down) for the previous and next lot. Details are grouped
 into **Identification**, **Specs & compliance**, and **Listing**. Photos and
 consignment appear beside them on wide windows and below them on narrow ones. Drag
@@ -75,8 +79,9 @@ Use **Export to CSV or Excel…** and choose a file type:
   fields; no placeholder text is inserted. The encoding is UTF-8 with a BOM.
 - **Excel workbook (.xlsx)** is for opening and editing in Excel. Book Number is
   stored as literal Text, preserving leading zeros, long identifiers and
-  punctuation without formulas or apostrophe prefixes. Original multiline
-  descriptions are preserved.
+  punctuation without formulas or apostrophe prefixes. Like CSV, Excel exports
+  replace embedded line breaks with spaces so saving the workbook as CSV does
+  not recreate multiline lot records. This affects the exported copy only.
 
 CSV has no cell-type information. Even quoted numbers can lose leading zeros or
 precision when Excel opens and resaves them, so use the XLSX choice for Excel
@@ -109,8 +114,10 @@ include it and drag it (or select it and use the arrows) to set the order; a fie
 can go in the title, the description, both or neither. In the title, fields above
 **Your own wording** go before the words you type and fields below go after a dash.
 In the description, each ticked field becomes a line such as `Make: Colt` at the top,
-above your own text; the condition sentence is always added at the end. An
-**Example** box shows the resulting title and description as you change things.
+above your own text; condition wording is added at the end only when its note is
+configured in Settings. An **Example** box shows the resulting title and description.
+Existing unmodified starter condition lists are upgraded to empty notes; custom
+names, ordering and notes are kept. This does not rewrite saved lot descriptions.
 Under **Your own fields** click **Add field** to create fields such as Caliber or
 Finish: each gets a box in the lot editor's **More details** card and appears in
 both lists (ticked for the description), optionally with text before the value in
@@ -166,9 +173,10 @@ reopening the lot. Changing the condition replaces only recognised generated
 wording; unfamiliar or manually edited text is retained rather than discarded.
 Deleted or partially edited generated description lines are not rebuilt when
 their source fields change. Intact generated lines can still update normally.
-Explicitly selecting a condition restores its generated title wording and
-description sentence, even if you select the same condition again after deleting
-them. Saving, reopening, or finishing an unrelated edit does not restore deletions.
+Explicitly selecting a condition restores its generated title wording and, only
+when its note is non-empty, its description sentence. Empty notes leave existing
+description text unchanged. Saving, reopening, or finishing an unrelated edit does
+not restore deletions.
 Make and model entries capitalize word initials: `remington` becomes `Remington`
 and `sig sauer` becomes `Sig Sauer`. Existing capitalization in model codes such
 as `AR-15` and `M&P` is kept, and serial numbers are not reformatted.

@@ -1,4 +1,5 @@
 import csv
+import io
 
 import pytest
 from openpyxl import Workbook, load_workbook
@@ -310,7 +311,7 @@ def test_xlsx_export_preserves_text_identifiers_and_descriptions(
                 (
                     46000,
                     'Rifle, "special"',
-                    "First line\nSecond line",
+                    "First line Second line",
                     "Owner",
                     "07212026",
                 ),
@@ -324,6 +325,60 @@ def test_xlsx_export_preserves_text_identifiers_and_descriptions(
         assert list(wb.active.values) == expected
     finally:
         wb.close()
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_xlsx_to_csv_keeps_complete_lots_on_single_lines(tmp_path, shared):
+    source = tmp_path / "46000.xlsx"
+    destination = tmp_path / "export.xlsx"
+    description = 'Caliber: 20 Gauge\r\nType: Shotgun\rBarrel: 27"\n\nCondition: Good'
+    lots = [
+        Lot(
+            46000,
+            title='Rifle,\n"one"',
+            desc=description,
+            owner="Donald\u2028Hughes",
+            book_no="0623-6",
+        ),
+        Lot(46001, title="Second rifle", desc=description, book_no="007"),
+        Lot(46002, title="Empty description", owner="Owner", book_no="008"),
+    ]
+    excel.create_auction(source)
+    for lot in lots:
+        excel.save_lot(source, lot)
+    original = source.read_bytes()
+    if shared:
+        excel.export_lots(lots, destination)
+    else:
+        excel.export_auction(source, destination)
+
+    # Convert the exported cell values as Save As CSV does, without fixing them.
+    converted = io.StringIO(newline="")
+    wb = load_workbook(destination)
+    try:
+        csv.writer(converted).writerows(wb.active.values)
+    finally:
+        wb.close()
+    lines = converted.getvalue().splitlines()
+    assert [next(csv.reader([line], strict=True)) for line in lines] == [
+        EXPECTED_HEADERS[:5],
+        [
+            "46000",
+            'Rifle, "one"',
+            'Caliber: 20 Gauge Type: Shotgun Barrel: 27"  Condition: Good',
+            "Donald Hughes",
+            "0623-6",
+        ],
+        [
+            "46001",
+            "Second rifle",
+            'Caliber: 20 Gauge Type: Shotgun Barrel: 27"  Condition: Good',
+            "",
+            "007",
+        ],
+        ["46002", "Empty description", "", "Owner", "008"],
+    ]
     assert source.read_bytes() == original
 
 

@@ -220,7 +220,8 @@ def _xlsx_data(rows) -> bytes:
                 cell = ws.cell(row_number, column, value)
                 # Text identifiers and listing text must not become formulas.
                 if column > 1 and value is not None:
-                    cell.value = str(value)
+                    # Keep Excel's later CSV conversion to one line per lot.
+                    cell.value = " ".join(str(value).splitlines())
                     cell.data_type = "s"
                 if column == end:
                     cell.number_format = "@"

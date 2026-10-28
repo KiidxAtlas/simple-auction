@@ -188,7 +188,7 @@ def test_local_export_formats_and_cancel(
         else:
             sheet = read_xlsx(tmp_path / expected)
             assert sheet["B2"].value == 'Café, "special"'
-            assert sheet["C2"].value == "First line\nSecond line"
+            assert sheet["C2"].value == "First line Second line"
             assert sheet["E2"].value == "0123"
             assert sheet["E2"].number_format == "@"
             assert not errors
@@ -533,10 +533,17 @@ def test_saved_client_reconnects_when_host_returns_at_new_address(
         reopened._network_timer.stop()
         assert reopened.client.address == address
         assert reopened.client.identity == identity
+        # A restart opens the saved copy at once; the first poll connects.
+        assert "Offline" in reopened.network_status.text()
+        assert len(reopened._shared_snapshot["auctions"]) == 1
+        poll(reopened)
         assert "Connected" in reopened.network_status.text()
+        assert not reopened.client.offline
         moved.close()
         poll(reopened)
-        assert "Reconnecting automatically" in reopened.network_status.text()
+        assert "Offline" in reopened.network_status.text()
+        assert reopened.client.offline
+        assert len(reopened._shared_snapshot["auctions"]) == 1
         assert Config.load(path).sharing == saved
         assert warnings == []
     finally:
@@ -607,3 +614,133 @@ def test_preserved_draft_contains_independent_photo_copy(windows, tmp_path):
     copied = Path(data["lot"]["photos"][0])
     assert copied != source
     assert copied.read_bytes() == source.read_bytes()
+
+
+def test_joining_window_keeps_working_offline_and_syncs_when_host_returns(
+    windows, host, monkeypatch
+):
+    a, b = windows
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
+    a.create_auction()
+    auction, first = a.auction_no, a.lot_no
+    poll(b)
+    config, code = host.db.config, host.code
+    host.close()
+    host.close = lambda: None  # the fixture would stop it again
+    returned = None
+    try:
+        # Unreachable: browse, edit and add lots from the copy on this computer.
+        b.open_lot(auction, first)
+        assert b.client.offline
+        assert "Offline" in b.network_status.text()
+        b.form.title.setText("Edited offline")
+        assert b.flush()
+        assert b.form.save_state.text() == main_page.strings.SAVED_OFFLINE
+        b.create_lot(auction)
+        assert b.lot_no == first + 1
+        b.form.title.setText("Added offline")
+        b.form.make.setText("Maker")
+        b.form.condition.setCurrentIndex(b.form.condition.findText("Good"))
+        assert b.flush()
+        assert "2 edits" in b.network_status.text()
+        # Output is counted, and its page drawn, from this computer alone.
+        assert b.output.has(auction, first + 1)
+        assert b.info_chip.text() == "1 filled in"
+        reports = []
+        monkeypatch.setattr(
+            b.output_page, "show_report", lambda *args: reports.append(args)
+        )
+        b.refresh_output()
+        [(_, pipeline, *_)] = reports
+        assert pipeline is not None and pipeline.total == 2
+        poll(b)  # still unreachable: nothing lost, nothing blocks
+        assert b.client.offline and b.lot_no == first + 1
+        assert b.output.has(auction, first + 1)  # the old host copy isn't adopted
+        assert warnings == []
+
+        # The host returns; someone else took the lot number used offline.
+        returned = network.Host(config, code, port=0, bind="127.0.0.1", discovery=False)
+        returned.db.dispatch("new_lot", {"auction": auction})
+        b.client.address = f"http://127.0.0.1:{returned.port}"  # as discovery would
+        poll(b)
+        assert not b.client.offline
+        assert "Connected" in b.network_status.text()
+        assert (b.auction_no, b.lot_no) == (auction, first + 2)
+        assert b.form.title.text() == "Added offline"
+        lots = {
+            v["lot_number"]: v["title"]
+            for v in returned.db.dispatch("snapshot", {})["auctions"][str(auction)]
+        }
+        # The saved title is composed from the make and condition as well.
+        assert lots == {
+            first: "Edited offline",
+            first + 1: "",
+            first + 2: "Maker Added offline Good Condition",
+        }
+        # The output counted offline follows the lot to its new number.
+        counted = returned.db.dispatch("snapshot", {})["output"]["info"]
+        assert [(r["auction"], r["lot"]) for r in counted] == [(auction, first + 2)]
+        assert b.output.has(auction, first + 2)
+        assert not b.output.has(auction, first + 1)
+        # Later saves of the renumbered open lot go to its new number.
+        b.form.title.setText("Edited after sync")
+        assert b.flush()
+        poll(b)
+        after = {
+            v["lot_number"]: v["title"]
+            for v in returned.db.dispatch("snapshot", {})["auctions"][str(auction)]
+        }
+        assert after[first + 2] == "Maker Edited after sync Good Condition"
+        assert after[first + 1] == ""
+        assert warnings == []
+    finally:
+        if returned:
+            returned.close()
+
+
+def test_joining_computer_is_offered_its_own_hidden_auctions(windows, monkeypatch):
+    from simple_auction.models import Lot
+    from simple_auction.services import catalogue, excel
+    from simple_auction.services.lot_details import details_path
+
+    a, _ = windows
+    for auction in (77000, 78000):
+        path = excel.auction_path(a.config.auctions_dir, auction)
+        excel.create_auction(path)
+        catalogue.add(
+            path,
+            details_path(a.config.data_dir, auction),
+            [Lot(auction, title=f"Mine {auction}")],
+        )
+    asked = []
+    answer = {"copy": True}
+
+    def clicked(box):
+        asked.append(box.text())
+        label = main_page.strings.LOCAL_AUCTIONS_COPY
+        return next(
+            (b for b in box.buttons() if answer["copy"] and b.text() == label), None
+        )
+
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: 0)
+    monkeypatch.setattr(QMessageBox, "clickedButton", clicked)
+    # Copy one, decline the other.
+    (path := excel.auction_path(a.config.auctions_dir, 78000)).rename(
+        path.with_suffix(".hidden")
+    )
+    a._local_offer = None
+    poll(a)
+    assert len(asked) == 1 and "Auction 77000" in asked[0]
+    assert "77000" in a._shared_snapshot["auctions"]
+    assert a._catalogue_lots[77000][0].title == "Mine 77000"
+    path.with_suffix(".hidden").rename(path)
+    answer["copy"] = False
+    a._local_offer = None
+    poll(a)
+    assert len(asked) == 2 and "Auction 78000" in asked[1]
+    assert "78000" not in a._shared_snapshot["auctions"]
+    # A declined auction is not asked about again until its workbook changes.
+    a._local_offer = None
+    poll(a)
+    assert len(asked) == 2

@@ -7,8 +7,8 @@ from dataclasses import replace
 from simple_auction.constants import TITLE_MAX_LENGTH
 from simple_auction.models import Lot
 from simple_auction.services.conditions import (
-    DEFAULT_CONDITIONS,
     LEGACY_DEFAULT_CONDITIONS,
+    PREVIOUS_DEFAULT_CONDITIONS,
     ConditionOption,
 )
 
@@ -68,6 +68,10 @@ def condition_desc(
     user's edit, so retain it rather than guessing where generated text ends.
     Existing condition lines stay in place, including text written after them.
     """
+    # An empty configured note opts out entirely, including the name-only line.
+    # Do not remove or normalise description text already saved by the user.
+    if condition and not note.strip():
+        return desc
     alts = _any_of([*known, condition])
     line = f"Condition: {condition}. {note}".strip() if condition else ""
     notes = sorted(
@@ -78,7 +82,10 @@ def condition_desc(
                 *known_notes,
                 *(
                     option.note
-                    for option in [*DEFAULT_CONDITIONS, *LEGACY_DEFAULT_CONDITIONS]
+                    for option in [
+                        *PREVIOUS_DEFAULT_CONDITIONS,
+                        *LEGACY_DEFAULT_CONDITIONS,
+                    ]
                 ),
             ]
             if text.strip()

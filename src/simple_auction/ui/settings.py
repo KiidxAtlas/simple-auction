@@ -438,9 +438,10 @@ class SettingsDialog(QDialog):
         )
         lines = desc_lines(sample, self.desc_fields(), labels(custom))
         desc = update_desc(strings.LISTING_PREVIEW_DESC_TEXT, [], lines)
-        self.preview_desc.setText(
-            condition_desc(desc, "Excellent", strings.LISTING_PREVIEW_CONDITION)
+        note = next(
+            (o.note for o in self._original_conditions if o.name == "Excellent"), ""
         )
+        self.preview_desc.setText(condition_desc(desc, "Excellent", note))
 
     def _appearance_page(self, config: Config) -> QWidget:
         section = self._section(strings.THEME_SECTION)

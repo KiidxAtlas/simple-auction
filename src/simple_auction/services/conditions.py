@@ -24,9 +24,9 @@ FILE_HEADER = """\
 # One per line:   Name: text added to the description
 #   - The order here is the order in the Condition dropdown.
 #   - New lots start with no condition until one is picked.
-#   - Picking a condition adds " - Name" to the title and
-#     "Condition: Name. <text>" to the end of the description.
-#   - Leave the text empty (just "Name:") to add only "Condition: Name."
+#   - Picking a condition adds its name to the title.
+#   - Notes are empty by default and add nothing to the description.
+#   - Set a note to opt into "Condition: Name. <text>" in the description.
 #   - Put quotes around a name or text that contains a colon, e.g.
 #     "Good: see notes": Some wear.
 #   - Percentages such as 80% are fine. Descriptions starting with % are
@@ -47,7 +47,7 @@ class ConditionOption:
     note: str = ""  # the sentence after "Condition: Excellent." in descriptions
 
 
-DEFAULT_CONDITIONS = [
+PREVIOUS_DEFAULT_CONDITIONS = [
     ConditionOption(
         "Factory New",
         "All original parts; 100% original finish; in perfect condition in every respect in and out.",
@@ -86,7 +86,10 @@ DEFAULT_CONDITIONS = [
     ),
 ]
 
-# Only this exact, unmodified starter list is eligible for automatic migration.
+# Keep old templates for exact-list migration and recognising existing wording.
+DEFAULT_CONDITIONS = [ConditionOption(o.name) for o in PREVIOUS_DEFAULT_CONDITIONS]
+
+# Exact, unmodified starter lists are eligible for automatic migration.
 # Custom names, notes, ordering, and intentionally empty lists are preserved.
 LEGACY_DEFAULT_CONDITIONS = [
     ConditionOption("Like New", "Appears unfired or barely used, no notable wear."),

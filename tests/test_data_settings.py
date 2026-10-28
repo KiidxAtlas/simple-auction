@@ -136,6 +136,9 @@ def test_deleted_title_parts_stay_deleted_until_their_value_changes():
 
 def test_editor_does_not_put_back_deleted_generated_text(app):
     form = LotForm()
+    from simple_auction.services.conditions import ConditionOption
+
+    form.set_conditions([ConditionOption("Good", "Configured note.")])
     form.set_desc_fields(["make", "model"])
     form.load(Lot(1), 41000)
     form.make.setText("Colt")

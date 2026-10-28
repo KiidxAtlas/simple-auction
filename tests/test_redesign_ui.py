@@ -135,6 +135,84 @@ def test_blank_gun_type_reads_none_in_the_list_but_leaves_the_field_empty(app):
     form.deleteLater()
 
 
+@pytest.mark.parametrize(
+    "description", ["", "Original text.\n\nCondition: Good. Old notes."]
+)
+def test_condition_defaults_to_blank_without_changing_description(app, description):
+    from simple_auction.services.conditions import ConditionOption
+
+    form = LotForm()
+    try:
+        form.load(Lot(41002, desc=description), 41000)
+        assert form.condition.itemText(0) == ""
+        assert form.condition.currentIndex() == 0
+        assert form.condition.currentText() == ""
+        assert form.collect_for_save().condition == ""
+        assert form.desc.toPlainText() == description
+        form.title.setText("Custom title")
+        form.title.editingFinished.emit()
+        form.set_conditions([ConditionOption("Excellent", "Default note.")])
+        saved = form.collect_for_save()
+        assert saved.condition == ""
+        assert saved.desc == description
+        form.load(saved, 41000)
+        assert form.condition.currentText() == ""
+        assert form.desc.toPlainText() == description
+    finally:
+        form.mark_saved()
+        form.deleteLater()
+
+
+@pytest.mark.parametrize("condition", ["Good", "Custom condition"])
+def test_explicit_condition_and_existing_description_are_preserved(app, condition):
+    form = LotForm()
+    try:
+        lot = Lot(41002, condition=condition, desc="Existing description.")
+        form.load(lot, 41000)
+        assert form.condition.currentText() == condition
+        saved = form.collect_for_save()
+        assert saved.condition == condition
+        assert saved.desc == lot.desc
+        form.load(Lot(41003), 41000)
+        assert form.condition.currentText() == ""
+        assert form.collect_for_save().desc == ""
+        index = form.condition.findText("Good")
+        form.condition.setCurrentIndex(index)
+        form.condition.activated.emit(index)
+        assert form.collect_for_save().condition == "Good"
+        assert form.desc.toPlainText() == ""
+    finally:
+        form.mark_saved()
+        form.deleteLater()
+
+
+def test_each_default_condition_adds_no_description_on_explicit_selection(app):
+    from simple_auction.services.conditions import DEFAULT_CONDITIONS, ConditionOption
+
+    form = LotForm()
+    try:
+        for description in ("", "Original text.\n\nCondition: Good. Existing notes."):
+            form.load(Lot(41001, desc=description), 41000)
+            for option in DEFAULT_CONDITIONS:
+                index = form.condition.findText(option.name)
+                form.condition.setCurrentIndex(index)
+                form.condition.activated.emit(index)
+                saved = form.collect_for_save()
+                assert saved.condition == option.name
+                assert saved.desc == description
+                form.load(saved, 41000)
+                assert form.desc.toPlainText() == description
+        # Custom wording remains opt-in.
+        form.set_conditions([ConditionOption("Mint", "Never fired.")])
+        index = form.condition.findText("Mint")
+        form.condition.setCurrentIndex(index)
+        form.condition.activated.emit(index)
+        assert "Condition: Mint. Never fired." in form.desc.toPlainText()
+    finally:
+        form.mark_saved()
+        form.deleteLater()
+
+
 def test_photos_dropped_on_the_editor_are_added(app, tmp_path):
     photo = tmp_path / "front.jpg"
     Image.new("RGB", (4, 4)).save(photo)
