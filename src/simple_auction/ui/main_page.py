@@ -1077,6 +1077,11 @@ class MainPage(QMainWindow):
                 self._io("Exporting shared auction…", shared_export)
             else:
                 excel.export_auction(self._path(auction_no), destination)
+        except UnicodeEncodeError:
+            QMessageBox.critical(
+                self, strings.EXPORT, strings.EXPORT_ENCODING_UNSUPPORTED
+            )
+            return
         except OSError, network.NetworkError:
             log.exception("Exporting auction %s failed", auction_no)
             QMessageBox.critical(self, strings.EXPORT, strings.EXPORT_FAILED)

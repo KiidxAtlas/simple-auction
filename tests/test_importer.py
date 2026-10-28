@@ -1,3 +1,4 @@
+import pytest
 from openpyxl import Workbook
 
 from simple_auction.models import Lot
@@ -131,6 +132,25 @@ def test_csv(tmp_path):
     sheet = read_sheet(path)
     lots = build_lots(sheet, guess_mapping(sheet.headers), 41000, renumber=False)
     assert lots[0].title == "Colt 1911" and lots[0].serial == "C1"
+
+
+@pytest.mark.parametrize(
+    ("encoding", "title"),
+    [("utf-8-sig", "東京"), ("cp1252", "Café")],
+)
+def test_csv_import_preserves_encoded_text_and_book_identifiers(
+    tmp_path, encoding, title
+):
+    path = tmp_path / "catalogue.csv"
+    path.write_text(
+        f"Lot Number,Title,Description,Owner,Book Number\n46000,{title},,Zoë,007\n",
+        encoding=encoding,
+    )
+
+    sheet = read_sheet(path)
+    lots = build_lots(sheet, guess_mapping(sheet.headers), 46000, renumber=False)
+
+    assert lots == [Lot(46000, title=title, owner="Zoë", book_no="007")]
 
 
 def test_parse_condition_matches_configured_names():

@@ -5,6 +5,7 @@ their names, and the caller can override any match before building lots.
 """
 
 import csv
+import io
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -81,8 +82,12 @@ def _normalize(header: str) -> str:
 def _raw_rows(path: Path) -> list[list[object]]:
     suffix = path.suffix.lower()
     if suffix == ".csv":
-        with path.open(newline="", encoding="utf-8-sig") as f:
-            return [list(r) for r in csv.reader(f)]
+        raw = path.read_bytes()
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1252")
+        return [list(row) for row in csv.reader(io.StringIO(text, newline=""))]
     if suffix in (".xlsx", ".xlsm"):
         try:
             wb = load_workbook(path, read_only=True, data_only=True)

@@ -113,7 +113,7 @@ def test_two_windows_share_create_edit_photos_and_csv(windows, tmp_path, monkeyp
         lambda *args: (str(output), strings.EXPORT_CSV_FILTER),
     )
     a.export_auction(a.auction_no)
-    with output.open(encoding="utf-8-sig", newline="") as stream:
+    with output.open(encoding="cp1252", newline="") as stream:
         lots = list(csv.DictReader(stream))
     assert list(lots[0]) == [
         "Lot Number",
@@ -173,7 +173,7 @@ def test_local_export_formats_and_cancel(
             assert not list(tmp_path.glob("export*"))
             assert len(errors) == (1 if name else 0)
         elif expected.endswith(".csv"):
-            with (tmp_path / expected).open(encoding="utf-8-sig", newline="") as stream:
+            with (tmp_path / expected).open(encoding="cp1252", newline="") as stream:
                 lots = list(csv.DictReader(stream))
             assert list(lots[0]) == [
                 "Lot Number",
@@ -192,6 +192,45 @@ def test_local_export_formats_and_cancel(
             assert sheet["E2"].value == "0123"
             assert sheet["E2"].number_format == "@"
             assert not errors
+    finally:
+        page._autosave.stop()
+        page.shipping._save_timer.stop()
+        page.form._dirty = False
+        page.close()
+        page.deleteLater()
+        app.processEvents()
+
+
+def test_csv_encoding_error_preserves_existing_export_and_excel_text(
+    app, tmp_path, monkeypatch
+):
+    page = main_page.MainPage(
+        Config(base_dir=tmp_path / "local", photos_dir=tmp_path / "photos")
+    )
+    try:
+        page.create_auction()
+        page.form.title.setText("東京")
+        page.form.book_no.setText("007")
+        assert page.flush()
+        destination = tmp_path / "export.csv"
+        destination.write_bytes(b"previous catalogue")
+        errors = []
+        monkeypatch.setattr(
+            QFileDialog, "getSaveFileName", lambda *args: (str(destination), "")
+        )
+        monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args))
+
+        page.export_auction(page.auction_no)
+
+        assert len(errors) == 1
+        assert destination.read_bytes() == b"previous catalogue"
+        assert page.form.title.text() == "東京"
+        destination = tmp_path / "export.xlsx"
+        page.export_auction(page.auction_no)
+        sheet = read_xlsx(destination)
+        assert sheet["B2"].value == "東京"
+        assert sheet["E2"].value == "007"
+        assert len(errors) == 1
     finally:
         page._autosave.stop()
         page.shipping._save_timer.stop()

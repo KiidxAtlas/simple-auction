@@ -22,6 +22,18 @@ COLUMNS = [
     ("Year", "year", "Year"),
 ]
 HEADERS = [header for header, _field, _old in COLUMNS]
+_CSV_PUNCTUATION = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+    }
+)
 
 
 def _column_fields(headers) -> list[str | None]:
@@ -202,8 +214,10 @@ def _csv_data(rows) -> bytes:
             " ".join(str(value).splitlines()) if value is not None else ""
             for value in row[:end]
         ]
+        values[1] = values[1].translate(_CSV_PUNCTUATION)
+        values[2] = values[2].translate(_CSV_PUNCTUATION)
         writer.writerow(values)
-    return stream.getvalue().encode("utf-8-sig")
+    return stream.getvalue().encode("cp1252")
 
 
 def _xlsx_data(rows) -> bytes:

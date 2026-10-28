@@ -127,7 +127,7 @@ def test_legacy_load_export_and_save_preserve_fields_and_formatting(
     assert excel.load_auction(path) == [lot]
     excel.export_auction(path, exported)
     assert path.read_bytes() == original
-    with exported.open(encoding="utf-8-sig", newline="") as stream:
+    with exported.open(encoding="cp1252", newline="") as stream:
         assert list(csv.reader(stream)) == [
             EXPECTED_HEADERS[:5],
             [
@@ -194,7 +194,7 @@ def test_export_csv_content(tmp_path, shared, empty):
     expected = ",".join(EXPECTED_HEADERS[:5]) + "\r\n"
     if not empty:
         expected += '41001,"Café, ""special""",Line one Line two,Zoë,007\r\n'
-    assert destination.read_bytes() == expected.encode("utf-8-sig")
+    assert destination.read_bytes() == expected.encode("cp1252")
     assert source.read_bytes() == original
 
 
@@ -225,7 +225,7 @@ def test_export_keeps_lots_on_one_line_and_preserves_empty_cells(tmp_path, share
         excel.export_auction(source, destination)
 
     # Bulk Loader requires carriage returns removed, even inside quoted fields.
-    lines = destination.read_text(encoding="utf-8-sig").splitlines()
+    lines = destination.read_text(encoding="cp1252").splitlines()
     assert [next(csv.reader([line], strict=True)) for line in lines] == [
         EXPECTED_HEADERS[:5],
         [
@@ -254,7 +254,7 @@ def test_export_does_not_emit_empty_workbook_rows_as_lots(tmp_path):
 
     excel.export_auction(source, destination)
 
-    with destination.open(encoding="utf-8-sig", newline="") as stream:
+    with destination.open(encoding="cp1252", newline="") as stream:
         assert list(csv.reader(stream)) == [
             EXPECTED_HEADERS[:5],
             ["41001", "First", "First description", "", ""],
@@ -380,6 +380,68 @@ def test_xlsx_to_csv_keeps_complete_lots_on_single_lines(tmp_path, shared):
         ["46002", "Empty description", "", "Owner", "008"],
     ]
     assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_proxibid_csv_has_clean_legacy_headers_and_punctuation(tmp_path, shared):
+    source = tmp_path / "46000.xlsx"
+    destination = tmp_path / "export.csv"
+    lot = Lot(
+        46000,
+        title="Café’s “Special” 12‑gauge",
+        desc="Maker’s finish – bright — no wear.\nSecond line.",
+        owner="Zoë",
+        book_no="007",
+    )
+    excel.save_lot(source, lot)
+    original = source.read_bytes()
+
+    if shared:
+        excel.export_lots([lot], destination)
+    else:
+        excel.export_auction(source, destination)
+
+    # Proxibid's legacy reader must see the real first header, not ï»¿Lot Number.
+    with destination.open(encoding="cp1252", newline="") as stream:
+        assert list(csv.reader(stream)) == [
+            EXPECTED_HEADERS[:5],
+            [
+                "46000",
+                'Café\'s "Special" 12-gauge',
+                "Maker's finish - bright - no wear. Second line.",
+                "Zoë",
+                "007",
+            ],
+        ]
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_unrepresentable_csv_text_preserves_existing_files(tmp_path, shared):
+    source = tmp_path / "46000.xlsx"
+    destination = tmp_path / "export.csv"
+    lot = Lot(46000, title="東京", book_no="007")
+    excel.save_lot(source, lot)
+    original = source.read_bytes()
+    destination.write_bytes(b"previous catalogue")
+
+    with pytest.raises(UnicodeEncodeError):
+        if shared:
+            excel.export_lots([lot], destination)
+        else:
+            excel.export_auction(source, destination)
+
+    assert destination.read_bytes() == b"previous catalogue"
+    assert source.read_bytes() == original
+
+    workbook = tmp_path / "export.xlsx"
+    excel.export_lots([lot], workbook)
+    wb = load_workbook(workbook)
+    try:
+        assert wb.active["B2"].value == "東京"
+        assert wb.active["E2"].value == "007"
+    finally:
+        wb.close()
 
 
 def test_export_write_failure_preserves_source(tmp_path, monkeypatch):

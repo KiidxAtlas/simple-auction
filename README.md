@@ -82,12 +82,20 @@ Use **Export to CSV or Excel…** and choose a file type:
 - **Proxibid CSV (.csv)** is the upload format. Each lot occupies one physical
   line: line breaks inside fields become spaces. Empty cells remain empty fields
   with their commas and column positions preserved, including trailing empty
-  fields; no placeholder text is inserted. The encoding is UTF-8 with a BOM.
+  fields; no placeholder text is inserted. The encoding is Windows-1252 without
+  a BOM, preventing a garbled first header in Proxibid's legacy reader. Smart
+  quotes and typographic hyphens/dashes in Title and Description use plain
+  punctuation; saved catalogue text, owners and book identifiers are unchanged.
 - **Excel workbook (.xlsx)** is for opening and editing in Excel. Book Number is
   stored as literal Text, preserving leading zeros, long identifiers and
   punctuation without formulas or apostrophe prefixes. Like CSV, Excel exports
   replace embedded line breaks with spaces so saving the workbook as CSV does
   not recreate multiline lot records. This affects the exported copy only.
+
+If a CSV contains characters Windows-1252 cannot represent, export stops with an
+explanation and leaves any existing destination file untouched. Choose XLSX to
+preserve those characters, or edit them before making a Proxibid CSV. Catalogue
+imports accept both UTF-8 and Windows-1252 CSV files.
 
 CSV has no cell-type information. Even quoted numbers can lose leading zeros or
 precision when Excel opens and resaves them, so use the XLSX choice for Excel
@@ -100,9 +108,11 @@ breaks.
 
 For Proxibid **Bulk Loader**, indicate that the first row contains column headings.
 Map **Lot Number → Lot Number**, **Title → Lot Title**, and
-**Description → Lot Description**. Leave Owner and Book Number unmapped unless
-you intentionally use a corresponding supported field; neither is a unique lot
-identity. Never map Description, Owner or Book Number to Lot Number or Import ID.
+**Description → Lot Description**. If Proxibid defaults Title or Description to
+**Column ignored**, select their destination fields manually before finishing.
+Leave Owner and Book Number unmapped unless you intentionally use a corresponding
+supported field; neither is a unique lot identity. Never map Description, Owner
+or Book Number to Lot Number or Import ID.
 Review the scan preview before importing: the lot-number column must contain
 the actual lot numbers, not headings or description fragments. Proxibid's
 [catalogue upload guide, page 16](https://www.proxibid.com/AnnouncementFiles/File/The_Complete_Proxibid_Welcome_Packet.pdf#page=16)

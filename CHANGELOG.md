@@ -1,9 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.1.22 — 2026-10-27
 
 ### Fixed
 
+- Proxibid CSV exports now use Windows-1252 without a BOM, preventing the
+  garbled `ï»¿Lot Number` heading shown by the legacy importer. Smart quotes and
+  typographic dashes in listing text use plain punctuation; lot numbers, book
+  identifiers and saved catalogue text are unchanged.
+- Catalogue CSV import accepts UTF-8 and Windows-1252. Unsupported CSV export
+  characters produce a clear error without replacing an existing file; Excel
+  export continues to preserve full Unicode text.
 - Running `python -m main` or `python main.py` from a source checkout now loads
   that checkout's `src/simple_auction` package ahead of older installed copies.
   PyInstaller builds continue to use their bundled package.

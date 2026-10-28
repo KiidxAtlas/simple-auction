@@ -35,6 +35,11 @@ EXPORT_AUCTION_N = "Export auction {n} to CSV or Excel…"
 EXPORT_FORMAT_REQUIRED = "Choose a filename ending in .csv or .xlsx."
 EXPORT_CSV_FILTER = "Proxibid CSV (*.csv)"
 EXPORT_XLSX_FILTER = "Excel workbook (*.xlsx)"
+EXPORT_ENCODING_UNSUPPORTED = (
+    "This catalogue contains characters that Proxibid CSV cannot represent. "
+    "Choose Excel (.xlsx) to keep those characters, or replace them before "
+    "exporting CSV."
+)
 DELETE_LOT = "Delete this lot…"
 SAVE = "Save"
 ALL_SAVED = "✓ All changes saved"
